@@ -1,35 +1,55 @@
-/**
- * @file Motor.ino
- * @brief Simple H-bridge motor control helpers.
- *
- * Provides a minimal interface for driving a DC motor using
- * digital GPIO pins (e.g. Arduino-style platforms).
- *
- * The motor direction is controlled via two input pins,
- * while a separate enable pin turns the motor on or off.
- *
- * @author Paul Bucci
- * @date 2026
- */
+// Motor A (Left)
+int enA = 9;
+int in1 = 8;
+int in2 = 7;
 
+// Motor B (Right)
+int enB = 10;
+int in3 = 12;
+int in4 = 13;
 
-/**
- * @brief Drives a DC motor in a fixed direction using an H-bridge.
- *
- * @param in1 GPIO pin connected to motor driver input 1 (direction control)
- * @param in2 GPIO pin connected to motor driver input 2 (direction control)
- * @param enA GPIO pin connected to motor driver enable pin (motor on/off)
- */
-void drive(int in1, int in2, int enA) {
-    digitalWrite(in1, LOW);   // Direction control: IN1
-    digitalWrite(in2, HIGH);  // Direction control: IN2 (sets rotation direction)
-    digitalWrite(enA, HIGH);  // Enable motor driver
+int speed = 200; // Default startup speed
+
+void setup() {
+  pinMode(enA, OUTPUT); 
+  pinMode(in1, OUTPUT); 
+  pinMode(in2, OUTPUT);
+
+  pinMode(enB, OUTPUT); 
+  pinMode(in3, OUTPUT); 
+  pinMode(in4, OUTPUT);
+
+  Serial.begin(9600);
 }
 
-void stop(int in1, int in2, int enA) {
-    digitalWrite(in1, LOW);   // Direction control: IN1
-    digitalWrite(in2, HIGH);  // Direction control: IN2 (sets rotation direction)
-    digitalWrite(enA, LOW);   // Disable motor driver
+void loop() {
+  if (Serial.available() > 0) {
+    char cmd = Serial.read();
+
+    // Direction Controls
+    if (cmd == 'F')      drive(LOW, HIGH, LOW, HIGH);
+    else if (cmd == 'B') drive(HIGH, LOW, HIGH, LOW);
+    else if (cmd == 'R') drive(HIGH, LOW, LOW, HIGH);
+    else if (cmd == 'L') drive(LOW, HIGH, HIGH, LOW);
+    else if (cmd == 'S') drive(LOW, LOW, LOW, LOW);
+    // Speed Controls (0 - 9)
+    else if (cmd >= '0' && cmd <= '9') {
+      // Convert char '0'-'9' to integer 0-9
+      int val = cmd - '0';
+      
+      // Map 0-9 to PWM range 0-255
+      // We start mapping at 0, but practically motors stall < 60
+      speed = map(val, 0, 9, 0, 255); 
+    }
+  }
 }
 
-// TODO: add your own driving functions here
+void drive(int a1, int a2, int b1, int b2) {
+  digitalWrite(in1, a1);
+  digitalWrite(in2, a2);
+  analogWrite(enA, (a1 == a2) ? 0 : speed); 
+
+  digitalWrite(in3, b1);
+  digitalWrite(in4, b2);
+  analogWrite(enB, (b1 == b2) ? 0 : speed);
+}
