@@ -39,7 +39,7 @@ void loop() {
       
       // Map 0-9 to PWM range 0-255
       // We start mapping at 0, but practically motors stall < 60
-      speed = map(val, 0, 9, 0, 255); 
+      speed = map(val, 0, 9, 60, 255);
     }
   }
 }
@@ -54,5 +54,3 @@ void drive(int a1, int a2, int b1, int b2) {
   analogWrite(enB, (b1 == b2) ? 0 : speed);
 }
 
-// hello
-// this is a new comment
