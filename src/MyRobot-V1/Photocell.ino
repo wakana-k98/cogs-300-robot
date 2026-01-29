@@ -1,7 +1,7 @@
 pinMode(pwmPin, OUTPUT);
   pinMode(motorPin1, OUTPUT);
   pinMode(motorPin2, OUTPUT);
-}
+} 
 
 void loop() {
 
