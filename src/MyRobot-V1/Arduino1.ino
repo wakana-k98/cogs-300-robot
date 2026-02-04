@@ -7,7 +7,7 @@ int in3 = 12;
 int in4 = 13;
 int speed = 200;
 
-// Motor trim
+// Motor trim (adjust these to fix veering)
 float leftTrim = 0.6;
 float rightTrim = 1.0;
 
@@ -29,20 +29,15 @@ const int ENCODER_SLOTS = 20;
 const float WHEEL_DIAMETER = 6.5;  // cm
 const float CM_PER_COUNT = (PI * WHEEL_DIAMETER) / ENCODER_SLOTS;
 
-// ========== ULTRASONIC 1 (Local) ==========
+// ========== ULTRASONIC SENSOR 1 (Front/Side) ==========
 const int trigPin1 = 4;
 const int echoPin1 = 5;
 long duration1, cm1;
 
-// ========== ULTRASONIC 2 (From Arduino 2) ==========
-long cm2 = 0;
-
-// ========== SERIAL COMMUNICATION ==========
-#include <SoftwareSerial.h>
-SoftwareSerial arduino2(10, 11); // RX=10, TX=11
-
-// ========== COMMAND TRACKING ==========
-String currentCommand = "";
+// ========== ULTRASONIC SENSOR 2 (Front/Side) ==========
+const int trigPin2 = 6;
+const int echoPin2 = 11;
+long duration2, cm2;
 
 // ========== INTERRUPT SERVICE ROUTINES ==========
 void leftEncoder() {
@@ -62,7 +57,7 @@ void setup() {
   pinMode(in3, OUTPUT); 
   pinMode(in4, OUTPUT);
 
-  // Encoder setup
+  // Encoder setup with interrupts
   pinMode(ENCODER_LEFT, INPUT_PULLUP);
   pinMode(ENCODER_RIGHT, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ENCODER_LEFT), leftEncoder, FALLING);
@@ -72,20 +67,24 @@ void setup() {
   pinMode(trigPin1, OUTPUT);
   pinMode(echoPin1, INPUT);
 
-  // Serial communication
-  Serial.begin(9600);      // USB to computer
-  arduino2.begin(9600);    // Communication with Arduino 2
+  // Ultrasonic 2 setup
+  pinMode(trigPin2, OUTPUT);
+  pinMode(echoPin2, INPUT);
+
+  Serial.begin(9600);
   
-  // Print CSV header
-  Serial.println("time_ms,left_count,right_count,left_dist_cm,right_dist_cm,left_speed,right_speed,ultrasonic1_cm,ultrasonic2_cm,command");
+  Serial.println("========================================");
+  Serial.println("🤖 ROBOT TELEMETRY SYSTEM");
+  Serial.println("========================================");
+  Serial.println();
   
   lastTime = millis();
 }
 
 void loop() {
-  // ========== READ ULTRASONIC 1 (Local) ==========
+  // ========== READ ULTRASONIC SENSOR 1 ==========
   digitalWrite(trigPin1, LOW);
-  delayMicroseconds(5);
+  delayMicroseconds(2);
   digitalWrite(trigPin1, HIGH);
   delayMicroseconds(10);
   digitalWrite(trigPin1, LOW);
@@ -93,11 +92,18 @@ void loop() {
   duration1 = pulseIn(echoPin1, HIGH);
   cm1 = (duration1 / 2) / 29.1;
 
-  // ========== READ ULTRASONIC 2 (From Arduino 2) ==========
-  if (arduino2.available()) {
-    String data = arduino2.readStringUntil('\n');
-    cm2 = data.toInt();
-  }
+  // Small delay between sensors
+  delayMicroseconds(10);
+
+  // ========== READ ULTRASONIC SENSOR 2 ==========
+  digitalWrite(trigPin2, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin2, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin2, LOW);
+  
+  duration2 = pulseIn(echoPin2, HIGH);
+  cm2 = (duration2 / 2) / 29.1;
 
   // ========== PRINT TELEMETRY (every 100ms) ==========
   unsigned long currentTime = millis();
@@ -112,26 +118,46 @@ void loop() {
     float leftSpeed = ((leftCount - lastLeftCount) * CM_PER_COUNT) / deltaTime;
     float rightSpeed = ((rightCount - lastRightCount) * CM_PER_COUNT) / deltaTime;
 
-    // Print CSV format
+    // Print telemetry with labels
+    Serial.println("----------------------------------------");
+    Serial.print("⏱️  Time: ");
     Serial.print(currentTime);
-    Serial.print(",");
+    Serial.println(" ms");
+    
+    Serial.println();
+    Serial.println("📊 ENCODERS:");
+    Serial.print("   Left Count:  ");
     Serial.print(leftCount);
-    Serial.print(",");
+    Serial.print(" ticks  |  Right Count: ");
     Serial.print(rightCount);
-    Serial.print(",");
+    Serial.println(" ticks");
+    
+    Serial.println();
+    Serial.println("📏 DISTANCE:");
+    Serial.print("   Left:  ");
     Serial.print(leftDistance, 2);
-    Serial.print(",");
+    Serial.print(" cm  |  Right: ");
     Serial.print(rightDistance, 2);
-    Serial.print(",");
+    Serial.println(" cm");
+    
+    Serial.println();
+    Serial.println("🏃 SPEED:");
+    Serial.print("   Left:  ");
     Serial.print(leftSpeed, 2);
-    Serial.print(",");
+    Serial.print(" cm/s  |  Right: ");
     Serial.print(rightSpeed, 2);
-    Serial.print(",");
+    Serial.println(" cm/s");
+    
+    Serial.println();
+    Serial.println("📡 ULTRASONIC SENSORS:");
+    Serial.print("   Sensor 1 (Pins 4/5):  ");
     Serial.print(cm1);
-    Serial.print(",");
+    Serial.print(" cm  |  Sensor 2 (Pins 6/11): ");
     Serial.print(cm2);
-    Serial.print(",");
-    Serial.println(currentCommand);
+    Serial.println(" cm");
+    
+    Serial.println("----------------------------------------");
+    Serial.println();
 
     // Update for next iteration
     lastLeftCount = leftCount;
@@ -143,31 +169,41 @@ void loop() {
   if (Serial.available() > 0) {
     char cmd = Serial.read();
     
+    // Print command received
+    Serial.print("🎮 Command: ");
+    
     if (cmd == 'F') {
-      currentCommand = "FORWARD";
+      Serial.println("FORWARD ⬆️");
       drive(LOW, HIGH, LOW, HIGH);
     }
     else if (cmd == 'B') {
-      currentCommand = "BACKWARD";
+      Serial.println("BACKWARD ⬇️");
       drive(HIGH, LOW, HIGH, LOW);
     }
     else if (cmd == 'L') {
-      currentCommand = "LEFT";
+      Serial.println("LEFT ⬅️");
       drive(HIGH, LOW, LOW, HIGH);
     }
     else if (cmd == 'R') {
-      currentCommand = "RIGHT";
+      Serial.println("RIGHT ➡️");
       drive(LOW, HIGH, HIGH, LOW);
     }
     else if (cmd == 'S') {
-      currentCommand = "STOP";
+      Serial.println("STOP 🛑");
       drive(LOW, LOW, LOW, LOW);
     }
     else if (cmd >= '0' && cmd <= '9') {
       int val = cmd - '0';
       speed = map(val, 0, 9, 100, 255);
-      currentCommand = "SPEED_" + String(val);
+      Serial.print("Speed set to: ");
+      Serial.print(val);
+      Serial.println(" ⚡");
     }
+    else {
+      Serial.print("Unknown: ");
+      Serial.println(cmd);
+    }
+    Serial.println();
   }
 
   delay(10);
