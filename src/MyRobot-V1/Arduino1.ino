@@ -29,17 +29,20 @@ const int ENCODER_SLOTS = 20;
 const float WHEEL_DIAMETER = 6.5;  // cm
 const float CM_PER_COUNT = (PI * WHEEL_DIAMETER) / ENCODER_SLOTS;
 
-// ========== ULTRASONIC 1 (Local on Arduino 1) ==========
+// ========== ULTRASONIC 1 (Local) ==========
 const int trigPin1 = 4;
 const int echoPin1 = 5;
 long duration1, cm1;
 
 // ========== ULTRASONIC 2 (From Arduino 2) ==========
-long cm2 = 0;  // Will be updated from Arduino 2
+long cm2 = 0;
 
 // ========== SERIAL COMMUNICATION ==========
 #include <SoftwareSerial.h>
-SoftwareSerial arduino2(10, 11); // RX=10 (connect to Arduino 2 TX), TX=11 (connect to Arduino 2 RX)
+SoftwareSerial arduino2(10, 11); // RX=10, TX=11
+
+// ========== COMMAND TRACKING ==========
+String currentCommand = "";
 
 // ========== INTERRUPT SERVICE ROUTINES ==========
 void leftEncoder() {
@@ -73,10 +76,8 @@ void setup() {
   Serial.begin(9600);      // USB to computer
   arduino2.begin(9600);    // Communication with Arduino 2
   
-  Serial.println("========================================");
-  Serial.println("🤖 ROBOT TELEMETRY SYSTEM (2 Ultrasonics)");
-  Serial.println("========================================");
-  Serial.println();
+  // Print CSV header
+  Serial.println("time_ms,left_count,right_count,left_dist_cm,right_dist_cm,left_speed,right_speed,ultrasonic1_cm,ultrasonic2_cm,command");
   
   lastTime = millis();
 }
@@ -95,7 +96,7 @@ void loop() {
   // ========== READ ULTRASONIC 2 (From Arduino 2) ==========
   if (arduino2.available()) {
     String data = arduino2.readStringUntil('\n');
-    cm2 = data.toInt();  // Convert string to integer
+    cm2 = data.toInt();
   }
 
   // ========== PRINT TELEMETRY (every 100ms) ==========
@@ -111,47 +112,26 @@ void loop() {
     float leftSpeed = ((leftCount - lastLeftCount) * CM_PER_COUNT) / deltaTime;
     float rightSpeed = ((rightCount - lastRightCount) * CM_PER_COUNT) / deltaTime;
 
-    // Print telemetry with labels
-    Serial.println("----------------------------------------");
-    Serial.print("⏱️  Time: ");
+    // Print CSV format
     Serial.print(currentTime);
-    Serial.println(" ms");
-    
-    Serial.println();
-    Serial.println("📊 ENCODERS:");
-    Serial.print("   Left Count:  ");
+    Serial.print(",");
     Serial.print(leftCount);
-    Serial.print(" ticks  |  Right Count: ");
+    Serial.print(",");
     Serial.print(rightCount);
-    Serial.println(" ticks");
-    
-    Serial.println();
-    Serial.println("📏 DISTANCE:");
-    Serial.print("   Left:  ");
+    Serial.print(",");
     Serial.print(leftDistance, 2);
-    Serial.print(" cm  |  Right: ");
+    Serial.print(",");
     Serial.print(rightDistance, 2);
-    Serial.println(" cm");
-    
-    Serial.println();
-    Serial.println("🏃 SPEED:");
-    Serial.print("   Left:  ");
+    Serial.print(",");
     Serial.print(leftSpeed, 2);
-    Serial.print(" cm/s  |  Right: ");
+    Serial.print(",");
     Serial.print(rightSpeed, 2);
-    Serial.println(" cm/s");
-    
-    Serial.println();
-    Serial.println("📡 ULTRASONICS:");
-    Serial.print("   Sensor 1 (Front): ");
+    Serial.print(",");
     Serial.print(cm1);
-    Serial.println(" cm");
-    Serial.print("   Sensor 2 (Side):  ");
+    Serial.print(",");
     Serial.print(cm2);
-    Serial.println(" cm");
-    
-    Serial.println("----------------------------------------");
-    Serial.println();
+    Serial.print(",");
+    Serial.println(currentCommand);
 
     // Update for next iteration
     lastLeftCount = leftCount;
@@ -163,36 +143,31 @@ void loop() {
   if (Serial.available() > 0) {
     char cmd = Serial.read();
     
-    Serial.print("🎮 Command: ");
-    
     if (cmd == 'F') {
-      Serial.println("FORWARD ⬆️");
+      currentCommand = "FORWARD";
       drive(LOW, HIGH, LOW, HIGH);
     }
     else if (cmd == 'B') {
-      Serial.println("BACKWARD ⬇️");
+      currentCommand = "BACKWARD";
       drive(HIGH, LOW, HIGH, LOW);
     }
     else if (cmd == 'L') {
-      Serial.println("LEFT ⬅️");
+      currentCommand = "LEFT";
       drive(HIGH, LOW, LOW, HIGH);
     }
     else if (cmd == 'R') {
-      Serial.println("RIGHT ➡️");
+      currentCommand = "RIGHT";
       drive(LOW, HIGH, HIGH, LOW);
     }
     else if (cmd == 'S') {
-      Serial.println("STOP 🛑");
+      currentCommand = "STOP";
       drive(LOW, LOW, LOW, LOW);
     }
     else if (cmd >= '0' && cmd <= '9') {
       int val = cmd - '0';
       speed = map(val, 0, 9, 100, 255);
-      Serial.print("Speed set to: ");
-      Serial.print(val);
-      Serial.println(" ⚡");
+      currentCommand = "SPEED_" + String(val);
     }
-    Serial.println();
   }
 
   delay(10);
@@ -208,5 +183,3 @@ void drive(int a1, int a2, int b1, int b2) {
   digitalWrite(in4, b1);
   analogWrite(enB, (b1 == b2) ? 0 : speed * rightTrim);
 }
-
-
