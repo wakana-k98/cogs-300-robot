@@ -7,16 +7,17 @@ int in3 = 12;
 int in4 = 13;
 int speed = 200;
 
+// Motor trim (adjust these to fix veering)
+float leftTrim = 0.6;
+float rightTrim = 1.0;  // Adjust this value if robot still veers right
 
 // ========== ENCODER PINS ==========
 const int ENCODER_LEFT = 2;
 const int ENCODER_RIGHT = 3;
 
-// Encoder counting
+// Encoder counting (volatile because used in interrupts)
 volatile long leftCount = 0;
 volatile long rightCount = 0;
-int lastLeftState = HIGH;
-int lastRightState = HIGH;
 
 // For speed calculation
 unsigned long lastTime = 0;
@@ -31,8 +32,17 @@ const float CM_PER_COUNT = (PI * WHEEL_DIAMETER) / ENCODER_SLOTS;
 // ========== PHOTOCELL PIN ==========
 const int PHOTOCELL_PIN = A0;
 int photocellValue = 0;
-const int PHOTOCELL_THRESHOLD = 500;  // Adjust based on your calibration
+const int PHOTOCELL_THRESHOLD = 5;  // Adjust based on your calibration
 int state = -1;  // -1 = manual mode, 0 = waiting for start, 1 = leaving start tape, 2 = driving, 3 = done
+
+// ========== INTERRUPT SERVICE ROUTINES ==========
+void leftEncoder() {
+  leftCount++;
+}
+
+void rightEncoder() {
+  rightCount++;
+}
 
 void setup() {
   // Motor setup
@@ -43,9 +53,13 @@ void setup() {
   pinMode(in3, OUTPUT); 
   pinMode(in4, OUTPUT);
 
-  // Encoder setup
+  // Encoder setup with interrupts
   pinMode(ENCODER_LEFT, INPUT_PULLUP);
   pinMode(ENCODER_RIGHT, INPUT_PULLUP);
+  
+  // Attach interrupts - this will count encoder pulses automatically
+  attachInterrupt(digitalPinToInterrupt(ENCODER_LEFT), leftEncoder, FALLING);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_RIGHT), rightEncoder, FALLING);
 
   Serial.begin(9600);
   
@@ -56,21 +70,6 @@ void setup() {
 }
 
 void loop() {
-  // ========== READ ENCODERS ==========
-  int currentLeftState = digitalRead(ENCODER_LEFT);
-  int currentRightState = digitalRead(ENCODER_RIGHT);
-
-  // Count falling edges
-  if (lastLeftState == HIGH && currentLeftState == LOW) {
-    leftCount++;
-  }
-  if (lastRightState == HIGH && currentRightState == LOW) {
-    rightCount++;
-  }
-
-  lastLeftState = currentLeftState;
-  lastRightState = currentRightState;
-
   // ========== READ PHOTOCELL ==========
   photocellValue = analogRead(PHOTOCELL_PIN);
 
@@ -87,23 +86,22 @@ void loop() {
     float leftSpeed = ((leftCount - lastLeftCount) * CM_PER_COUNT) / deltaTime;
     float rightSpeed = ((rightCount - lastRightCount) * CM_PER_COUNT) / deltaTime;
 
-    // Print telemetry
     Serial.print(currentTime);
-    Serial.print(",");
+    Serial.print(" , LeftCount:");
     Serial.print(leftCount);
-    Serial.print(",");
+    Serial.print(" , RightCountL:");
     Serial.print(rightCount);
-    Serial.print(",");
+    Serial.print(" , LeftDistance:");
     Serial.print(leftDistance, 2);
-    Serial.print(",");
+    Serial.print(" , RightDistance:");
     Serial.print(rightDistance, 2);
-    Serial.print(",");
+    Serial.print(" , LeftSpeed: ");
     Serial.print(leftSpeed, 2);
-    Serial.print(",");
+    Serial.print(" , RightSpeed: ");
     Serial.print(rightSpeed, 2);
-    Serial.print(",");
+    Serial.print(" , Photocell: ");
     Serial.print(photocellValue);
-    Serial.print(",");
+    Serial.print(" , PhotoState: ");
     Serial.print(state);
     Serial.print(",");
 
@@ -119,10 +117,10 @@ void loop() {
     Serial.println(cmd);  // Print command in telemetry
 
     // Direction Controls
-    if (cmd == 'B')      drive(LOW, HIGH, LOW, HIGH);
-    else if (cmd == 'F') drive(HIGH, LOW, HIGH, LOW);
-    else if (cmd == 'R') drive(HIGH, LOW, LOW, HIGH);
-    else if (cmd == 'L') drive(LOW, HIGH, HIGH, LOW);
+    if (cmd == 'F')      drive(LOW, HIGH, LOW, HIGH);
+    else if (cmd == 'B') drive(HIGH, LOW, HIGH, LOW);
+    else if (cmd == 'L') drive(HIGH, LOW, LOW, HIGH);
+    else if (cmd == 'R') drive(LOW, HIGH, HIGH, LOW);
     else if (cmd == 'S') drive(LOW, LOW, LOW, LOW);
     // Speed Controls (0-9)
     else if (cmd >= '0' && cmd <= '9') {
@@ -150,7 +148,7 @@ void loop() {
   if (state == 0) {
     // Waiting for white tape to start
     if (photocellValue > PHOTOCELL_THRESHOLD) {
-      drive(HIGH, LOW, HIGH, LOW);  // Drive forward
+      drive(LOW, HIGH, LOW, HIGH);  // Drive forward
       state = 1;
     }
   }
@@ -168,16 +166,16 @@ void loop() {
     }
   }
 
-  delay(5);  // Small delay to prevent overwhelming serial
+  delay(100);  // Small delay - changed from 500ms to prevent blocking encoder counts
 }
 
 // ========== DRIVE FUNCTION ==========
 void drive(int a1, int a2, int b1, int b2) {
   digitalWrite(in1, a1);
   digitalWrite(in2, a2);
-  analogWrite(enA, (a1 == a2) ? 0 : speed); 
+  analogWrite(enA, (a1 == a2) ? 0 : speed * leftTrim); 
 
   digitalWrite(in3, b2);
   digitalWrite(in4, b1);
-  analogWrite(enB, (b1 == b2) ? 0 : speed);
+  analogWrite(enB, (b1 == b2) ? 0 : speed * rightTrim);
 }
