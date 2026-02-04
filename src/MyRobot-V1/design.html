@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Creative Pick-and-Place Robot Concepts</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState } = React;
+
+        function CreativeRobotConcepts() {
+            const [selectedConcept, setSelectedConcept] = useState(0);
+
+            const concepts = [
+                {
+                    name: "🍪 Cookie Dunking Robot",
+                    tagline: "The perfect milk-to-cookie ratio, every time",
+                    description: "Picks up cookies from a plate, dunks them in milk for exactly 3 seconds, then places them on a serving napkin. No more soggy disasters!",
+                    dof1: "Base rotation: Cookie jar → Milk glass → Napkin",
+                    dof2: "Arm height: Pick cookie → Dunk depth → Place",
+                    dof3: "Gripper: Gentle cookie grip (no crumbles!)",
+                    materials: ["Cardboard base with marked zones", "Popsicle stick arm", "Clothespin gripper", "Small cup for 'milk'", "Cardboard cookies"],
+                    color: "#8B4513"
+                },
+                {
+                    name: "🌱 Plant Watering Bot",
+                    tagline: "Waters your plants while you're in class",
+                    description: "Picks up a small watering cup, moves to different plant positions, tips to water, returns cup to station. Each plant gets perfect amount!",
+                    dof1: "Base rotation: Water reservoir → Plant 1 → Plant 2 → Plant 3",
+                    dof2: "Arm height: Pick up cup → Lift → Pour position",
+                    dof3: "Gripper tilt: Hold cup → Tilt to pour",
+                    materials: ["Lazy susan or cardboard turntable", "Arm with tilt joint", "Small cup holder gripper", "Mini plants (or marked spots)", "Decorative green cardboard"],
+                    color: "#228B22"
+                },
+                {
+                    name: "🎨 Artist's Palette Robot",
+                    tagline: "Organizes paintbrushes by color usage",
+                    description: "Picks up paintbrushes from a 'dirty' zone, pretends to clean them, then sorts them into color-coded holders (red brushes, blue brushes, etc.)",
+                    dof1: "Base rotation: Dirty zone → Cleaning station → Color bins",
+                    dof2: "Arm height: Pick from table → Lift → Place in holder",
+                    dof3: "Gripper: Gentle brush grip",
+                    materials: ["Rainbow colored cardboard zones", "Popsicle sticks", "Small tubes/straws as brush holders", "Actual small paintbrushes or straws", "Paint palette decoration"],
+                    color: "#FF1493"
+                },
+                {
+                    name: "☕ Coffee Shop Barista Bot",
+                    tagline: "From bean to cup (the last step, anyway)",
+                    description: "Picks up coffee cups from 'ready' area, adds sleeve, places on pickup counter with customer name facing forward. Professional service!",
+                    dof1: "Base rotation: Cup stack → Sleeve station → Pickup counter",
+                    dof2: "Arm height: Pick cup → Lift → Place gently",
+                    dof3: "Gripper rotation: Orient cup name forward",
+                    materials: ["Mini paper cups", "Cardboard counter", "Cup sleeves from cardstock", "Name tags", "Coffee shop themed decoration"],
+                    color: "#6F4E37"
+                },
+                {
+                    name: "🎮 Gaming Controller Organizer",
+                    tagline: "Puts your controllers away so mom doesn't yell",
+                    description: "Picks up game controllers from the couch, moves them to charging dock, returns to grab next one. Responsible gaming achieved!",
+                    dof1: "Base rotation: Couch zone → Charging station → Storage",
+                    dof2: "Arm height: Pick from couch → Lift → Place on dock",
+                    dof3: "Gripper: Wide grip for controller shape",
+                    materials: ["Cardboard couch mockup", "Charging dock area", "Cardboard controller cutouts", "Cool gaming aesthetic", "LED stickers for 'charging' effect"],
+                    color: "#9400D3"
+                },
+                {
+                    name: "🍕 Pizza Topping Distributor",
+                    tagline: "Solves the eternal pizza sharing debate",
+                    description: "Picks up toppings (pepperoni, olives, etc.) and distributes them evenly across pizza slices. No more fights over who got more pepperoni!",
+                    dof1: "Base rotation: Topping bins → Pizza quadrants",
+                    dof2: "Arm height: Pick topping → Lift → Place precisely",
+                    dof3: "Gripper: Small item precision grip",
+                    materials: ["Cardboard pizza with marked slices", "Small cups for 'toppings' (beads/poms)", "Popsicle stick arm", "Pizza box aesthetic", "Actual small toppings to place"],
+                    color: "#FF6347"
+                }
+            ];
+
+            const currentConcept = concepts[selectedConcept];
+
+            const drawRobot = (ctx, concept) => {
+                const baseColor = concept.color;
+                
+                // Base/turntable
+                ctx.fillStyle = baseColor;
+                ctx.beginPath();
+                ctx.arc(250, 350, 80, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                
+                // Zones marked on base
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.font = 'bold 10px Arial';
+                ctx.fillText('START', 220, 355);
+                
+                // Center post
+                ctx.fillStyle = '#666';
+                ctx.fillRect(235, 280, 30, 70);
+                
+                // Arm - articulated
+                ctx.strokeStyle = baseColor;
+                ctx.lineWidth = 12;
+                ctx.lineCap = 'round';
+                
+                // Shoulder to elbow
+                ctx.beginPath();
+                ctx.moveTo(250, 280);
+                ctx.lineTo(320, 200);
+                ctx.stroke();
+                
+                // Elbow to gripper
+                ctx.beginPath();
+                ctx.moveTo(320, 200);
+                ctx.lineTo(370, 240);
+                ctx.stroke();
+                
+                // Joint circles
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(250, 280, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                ctx.fillStyle = '#FFD700';
+                ctx.beginPath();
+                ctx.arc(320, 200, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                
+                // Gripper - simple claw
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 6;
+                ctx.lineCap = 'round';
+                
+                // Left jaw
+                ctx.beginPath();
+                ctx.moveTo(370, 240);
+                ctx.lineTo(360, 260);
+                ctx.stroke();
+                
+                // Right jaw
+                ctx.beginPath();
+                ctx.moveTo(370, 240);
+                ctx.lineTo(380, 260);
+                ctx.stroke();
+                
+                // Gripper pivot
+                ctx.fillStyle = baseColor;
+                ctx.beginPath();
+                ctx.arc(370, 240, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            };
+
+            const drawSetup = (ctx, concept) => {
+                ctx.clearRect(0, 0, 500, 400);
+                
+                // Table surface
+                const gradient = ctx.createLinearGradient(0, 370, 0, 400);
+                gradient.addColorStop(0, '#D2691E');
+                gradient.addColorStop(1, '#8B4513');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 370, 500, 30);
+                
+                // Wood grain texture
+                ctx.strokeStyle = 'rgba(139, 69, 19, 0.3)';
+                ctx.lineWidth = 1;
+                for (let i = 0; i < 500; i += 20) {
+                    ctx.beginPath();
+                    ctx.moveTo(i, 370);
+                    ctx.lineTo(i, 400);
+                    ctx.stroke();
+                }
+                
+                // Concept-specific setup
+                if (concept.name.includes('Cookie')) {
+                    // Cookie jar
+                    ctx.fillStyle = '#87CEEB';
+                    ctx.fillRect(80, 320, 50, 50);
+                    ctx.fillStyle = '#333';
+                    ctx.font = '12px Arial';
+                    ctx.fillText('🍪', 95, 350);
+                    
+                    // Milk glass
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                    ctx.fillRect(380, 330, 40, 40);
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(380, 330, 40, 40);
+                    
+                    // Napkin zone
+                    ctx.fillStyle = '#FFE4E1';
+                    ctx.fillRect(450, 350, 40, 20);
+                } else if (concept.name.includes('Plant')) {
+                    // Plants
+                    ctx.fillStyle = '#228B22';
+                    [100, 250, 400].forEach((x, i) => {
+                        ctx.beginPath();
+                        ctx.arc(x, 350, 15, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.fillStyle = '#8B4513';
+                        ctx.fillRect(x - 10, 350, 20, 20);
+                        ctx.fillStyle = '#228B22';
+                    });
+                } else if (concept.name.includes('Artist')) {
+                    // Color bins
+                    const colors = ['#FF0000', '#0000FF', '#FFFF00'];
+                    colors.forEach((color, i) => {
+                        ctx.fillStyle = color;
+                        ctx.fillRect(80 + i * 80, 340, 40, 30);
+                        ctx.strokeStyle = '#333';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(80 + i * 80, 340, 40, 30);
+                    });
+                } else if (concept.name.includes('Pizza')) {
+                    // Pizza
+                    ctx.fillStyle = '#FFD700';
+                    ctx.beginPath();
+                    ctx.arc(400, 340, 35, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#FF6347';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    
+                    // Slices
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 1;
+                    for (let i = 0; i < 8; i++) {
+                        ctx.beginPath();
+                        ctx.moveTo(400, 340);
+                        const angle = (i * Math.PI * 2) / 8;
+                        ctx.lineTo(400 + Math.cos(angle) * 35, 340 + Math.sin(angle) * 35);
+                        ctx.stroke();
+                    }
+                } else {
+                    // Generic zones
+                    ctx.fillStyle = 'rgba(100, 200, 100, 0.3)';
+                    ctx.fillRect(50, 330, 80, 40);
+                    ctx.fillStyle = '#333';
+                    ctx.font = '10px Arial';
+                    ctx.fillText('PICKUP', 65, 355);
+                    
+                    ctx.fillStyle = 'rgba(200, 100, 100, 0.3)';
+                    ctx.fillRect(370, 330, 80, 40);
+                    ctx.fillText('PLACE', 390, 355);
+                }
+                
+                // Draw the robot
+                drawRobot(ctx, concept);
+            };
+
+            React.useEffect(() => {
+                const canvas = document.getElementById('robotCanvas');
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    drawSetup(ctx, currentConcept);
+                }
+            }, [selectedConcept]);
+
+            return (
+                <div style={{
+                    fontFamily: 'Arial, sans-serif',
+                    maxWidth: '900px',
+                    margin: '0 auto',
+                    padding: '20px',
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    minHeight: '100vh'
+                }}>
+                    <div style={{
+                        background: 'white',
+                        borderRadius: '20px',
+                        padding: '30px',
+                        boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+                    }}>
+                        <h1 style={{
+                            textAlign: 'center',
+                            color: '#333',
+                            marginBottom: '10px',
+                            fontSize: '32px'
+                        }}>
+                            🤖 Creative Pick-and-Place Robot Ideas
+                        </h1>
+                        <p style={{
+                            textAlign: 'center',
+                            color: '#666',
+                            marginBottom: '30px',
+                            fontSize: '14px'
+                        }}>
+                            Your robot needs a PURPOSE! Pick one below for inspiration 🎯
+                        </p>
+
+                        {/* Concept Selector */}
+                        <div style={{
+                            display: 'flex',
+                            gap: '10px',
+                            marginBottom: '30px',
+                            flexWrap: 'wrap',
+                            justifyContent: 'center'
+                        }}>
+                            {concepts.map((concept, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => setSelectedConcept(idx)}
+                                    style={{
+                                        padding: '10px 15px',
+                                        borderRadius: '10px',
+                                        border: selectedConcept === idx ? `3px solid ${concept.color}` : '2px solid #ddd',
+                                        background: selectedConcept === idx ? concept.color : 'white',
+                                        color: selectedConcept === idx ? 'white' : '#333',
+                                        cursor: 'pointer',
+                                        fontSize: '12px',
+                                        fontWeight: 'bold',
+                                        transition: 'all 0.3s',
+                                        transform: selectedConcept === idx ? 'scale(1.05)' : 'scale(1)'
+                                    }}
+                                >
+                                    {concept.name.split(' ')[0]}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Main Display */}
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr 1fr',
+                            gap: '30px',
+                            marginBottom: '30px'
+                        }}>
+                            {/* Left: Visual */}
+                            <div>
+                                <h3 style={{
+                                    color: currentConcept.color,
+                                    marginBottom: '15px',
+                                    fontSize: '24px'
+                                }}>
+                                    {currentConcept.name}
+                                </h3>
+                                <p style={{
+                                    color: '#666',
+                                    fontStyle: 'italic',
+                                    marginBottom: '15px',
+                                    fontSize: '14px'
+                                }}>
+                                    {currentConcept.tagline}
+                                </p>
+                                
+                                <canvas
+                                    id="robotCanvas"
+                                    width="500"
+                                    height="400"
+                                    style={{
+                                        border: `3px solid ${currentConcept.color}`,
+                                        borderRadius: '10px',
+                                        background: '#f5f5f5',
+                                        width: '100%',
+                                        height: 'auto'
+                                    }}
+                                />
+                                
+                                <div style={{
+                                    marginTop: '15px',
+                                    padding: '10px',
+                                    background: '#f9f9f9',
+                                    borderRadius: '8px',
+                                    fontSize: '12px',
+                                    color: '#666'
+                                }}>
+                                    💡 <strong>What it does:</strong> {currentConcept.description}
+                                </div>
+                            </div>
+
+                            {/* Right: Details */}
+                            <div>
+                                <div style={{
+                                    background: '#f0f0f0',
+                                    padding: '20px',
+                                    borderRadius: '10px',
+                                    marginBottom: '15px'
+                                }}>
+                                    <h4 style={{
+                                        color: currentConcept.color,
+                                        marginBottom: '10px'
+                                    }}>
+                                        📐 Degrees of Freedom
+                                    </h4>
+                                    <div style={{ fontSize: '13px', lineHeight: '1.8' }}>
+                                        <div><strong>DOF 1:</strong> {currentConcept.dof1}</div>
+                                        <div><strong>DOF 2:</strong> {currentConcept.dof2}</div>
+                                        <div><strong>DOF 3:</strong> {currentConcept.dof3}</div>
+                                    </div>
+                                </div>
+
+                                <div style={{
+                                    background: '#fff3cd',
+                                    padding: '20px',
+                                    borderRadius: '10px',
+                                    marginBottom: '15px'
+                                }}>
+                                    <h4 style={{
+                                        color: '#856404',
+                                        marginBottom: '10px'
+                                    }}>
+                                        🛠️ Materials Needed
+                                    </h4>
+                                    <ul style={{
+                                        fontSize: '13px',
+                                        lineHeight: '1.6',
+                                        paddingLeft: '20px',
+                                        margin: 0
+                                    }}>
+                                        {currentConcept.materials.map((material, idx) => (
+                                            <li key={idx}>{material}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+
+                                <div style={{
+                                    background: '#d1ecf1',
+                                    padding: '15px',
+                                    borderRadius: '10px',
+                                    fontSize: '12px',
+                                    color: '#0c5460'
+                                }}>
+                                    <strong>💡 Pro Tip:</strong> Add personality! Paint it, add stickers, make it themed. 
+                                    The more creative and polished it looks, the better your grade! ⭐
+                                </div>
+
+                                <div style={{
+                                    marginTop: '15px',
+                                    padding: '15px',
+                                    background: '#d4edda',
+                                    borderRadius: '10px',
+                                    fontSize: '12px',
+                                    color: '#155724'
+                                }}>
+                                    <strong>✅ Build Time:</strong> 30-45 minutes<br/>
+                                    <strong>✅ Difficulty:</strong> Easy-Medium<br/>
+                                    <strong>✅ Cool Factor:</strong> 🔥🔥🔥🔥🔥
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Construction Tips */}
+                        <div style={{
+                            background: '#f8f9fa',
+                            padding: '20px',
+                            borderRadius: '10px',
+                            marginTop: '20px'
+                        }}>
+                            <h3 style={{ color: '#333', marginBottom: '15px' }}>
+                                🏗️ Quick Build Guide (Any Concept)
+                            </h3>
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                                gap: '15px',
+                                fontSize: '13px'
+                            }}>
+                                <div style={{
+                                    padding: '15px',
+                                    background: 'white',
+                                    borderRadius: '8px',
+                                    borderLeft: '4px solid #FF6B6B'
+                                }}>
+                                    <strong>1️⃣ Base (5 min)</strong><br/>
+                                    Cut cardboard circle or square. Mark the zones where items start and end.
+                                </div>
+                                <div style={{
+                                    padding: '15px',
+                                    background: 'white',
+                                    borderRadius: '8px',
+                                    borderLeft: '4px solid #4ECDC4'
+                                }}>
+                                    <strong>2️⃣ Arm (10 min)</strong><br/>
+                                    2-3 popsicle sticks connected with brads/paper fasteners for joints.
+                                </div>
+                                <div style={{
+                                    padding: '15px',
+                                    background: 'white',
+                                    borderRadius: '8px',
+                                    borderLeft: '4px solid '#95E1D3'
+                                }}>
+                                    <strong>3️⃣ Gripper (5 min)</strong><br/>
+                                    Clothespin, binder clip, or cardboard claw with rubber band.
+                                </div>
+                                <div style={{
+                                    padding: '15px',
+                                    background: 'white',
+                                    borderRadius: '8px',
+                                    borderLeft: '4px solid #F38181'
+                                }}>
+                                    <strong>4️⃣ Theme (10 min)</strong><br/>
+                                    Add decorations, labels, mini props. Make it fun and unique!
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div style={{
+                            marginTop: '30px',
+                            padding: '20px',
+                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            borderRadius: '10px',
+                            color: 'white',
+                            textAlign: 'center'
+                        }}>
+                            <h4 style={{ marginBottom: '10px' }}>🎥 For Your Video</h4>
+                            <p style={{ fontSize: '13px', margin: 0, opacity: 0.9 }}>
+                                Show the looks-like prototype doing its job manually, explain the DOFs, 
+                                then switch to your Arduino + Processing to show how the encoders would control it!
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<CreativeRobotConcepts />, document.getElementById('root'));
+    </script>
+</body>
+</html>
