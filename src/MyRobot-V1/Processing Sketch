@@ -1,0 +1,52 @@
+import processing.serial.*;
+
+Serial arduinoPort;
+
+void setup() {
+  size(200, 200);
+  println(Serial.list()); // See your serial ports here
+  
+  // Change the index to match your Arduino port from the list printed above
+  arduinoPort = new Serial(this, Serial.list()[2], 9600);
+  
+  textSize(16);
+  textAlign(CENTER, CENTER);
+}
+
+void draw() {
+  background(255);
+
+  if (keyPressed) {
+    switch(keyCode) {
+      case UP:
+        arduinoPort.write('F');
+        fill(0, 150, 0);
+        text("Moving Forward", width/2, height/2);
+        break;
+      case DOWN:
+        arduinoPort.write('B');
+        fill(150, 0, 0);
+        text("Moving Backward", width/2, height/2);
+        break;
+      case LEFT:
+        arduinoPort.write('L');
+        fill(0, 0, 150);
+        text("Turning Left", width/2, height/2);
+        break;
+      case RIGHT:
+        arduinoPort.write('R');
+        fill(150, 150, 0);
+        text("Turning Right", width/2, height/2);
+        break;
+      default:
+        arduinoPort.write('S');
+        fill(100);
+        text("Stopped", width/2, height/2);
+        break;
+    }
+  } else {
+    arduinoPort.write('S');
+    fill(100);
+    text("Stopped", width/2, height/2);
+  }
+}
