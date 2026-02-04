@@ -2,28 +2,30 @@ import processing.serial.*;
 
 Serial port;
 PrintWriter out;
-String currentCommand = "STOPPED";
-int currentSpeed = 5;
+
+// Telemetry data
+int timeMs = 0;
+int leftCount = 0;
+int rightCount = 0;
+float leftDist = 0;
+float rightDist = 0;
+float leftSpeed = 0;
+float rightSpeed = 0;
+int ultrasonic1 = 0;
+int ultrasonic2 = 0;
+String currentCommand = "";
+
 boolean connected = false;
 
-// Button positions
-int centerX, centerY;
-int btnSize = 80;
-int speedSliderX, speedSliderY;
-
 void setup() {
-  size(600, 800);
-  centerX = width/2;
-  centerY = 350;
-  speedSliderX = 100;
-  speedSliderY = 600;
+  size(900, 700);
   
   // List all serial ports
   printArray(Serial.list());
   
-  // CHANGE THIS to your Arduino port index
+  // CHANGE THIS to your Arduino 1 port index
   try {
-    String portName = Serial.list()[2];  // Change [0] to correct index
+    String portName = Serial.list()[0];  // Change [0] to correct index
     port = new Serial(this, portName, 9600);
     port.bufferUntil('\n');
     connected = true;
@@ -34,276 +36,276 @@ void setup() {
   
   // Create CSV file with timestamp
   String fn = nf(year(),4)+nf(month(),2)+nf(day(),2)+"_"+nf(hour(),2)+nf(minute(),2)+nf(second(),2);
-  out = createWriter("robot_log_"+fn+".csv");
+  out = createWriter("robot_telemetry_"+fn+".csv");
+  out.println("time_ms,left_count,right_count,left_dist_cm,right_dist_cm,left_speed,right_speed,ultrasonic1_cm,ultrasonic2_cm,command");
 }
 
 void draw() {
-  // Soft gradient background
+  // Soft pastel gradient background
   for (int i = 0; i < height; i++) {
     float inter = map(i, 0, height, 0, 1);
-    int c = lerpColor(color(255, 240, 245), color(230, 240, 255), inter);
+    int c = lerpColor(color(255, 240, 250), color(230, 240, 255), inter);
     stroke(c);
     line(0, i, width, i);
   }
+  noStroke();
   
   // Title
   fill(180, 120, 160);
-  textSize(32);
+  textSize(36);
   textAlign(CENTER, CENTER);
-  text("🤖 Robot Remote", centerX, 50);
+  text("🤖 Robot Dashboard", width/2, 40);
   
   // Connection status
   textSize(16);
   if (connected) {
     fill(120, 200, 120);
-    text("● CONNECTED", centerX, 90);
+    text("● CONNECTED", width/2, 80);
   } else {
     fill(255, 100, 100);
-    text("● DISCONNECTED", centerX, 90);
+    text("● DISCONNECTED", width/2, 80);
   }
   
   // Current command display
-  noStroke();
-  fill(255, 245, 250, 200);
-  rect(50, 120, width-100, 80, 15);
+  fill(255, 192, 203, 200);
+  rect(width/2 - 150, 100, 300, 60, 15);
+  fill(255);
+  textSize(24);
+  text("Command: " + currentCommand, width/2, 130);
   
-  fill(180, 120, 160);
-  textSize(20);
-  text("Current: " + currentCommand, centerX, 145);
-  text("Speed: " + currentSpeed, centerX, 175);
+  // Draw cards
+  drawCard(50, 180, 380, 200, "⏱️ TIME", timeMs + " ms", color(255, 220, 230));
   
-  // Draw D-pad remote
-  drawDPad();
+  drawEncoderCard(50, 400, 380, 250);
   
-  // Draw speed slider
-  drawSpeedSlider();
+  drawSpeedCard(470, 180, 380, 200);
   
-  // Draw mode buttons
-  drawModeButtons();
+  drawUltrasonicCard(470, 400, 380, 250);
   
   // Instructions
   fill(150, 100, 140);
   textSize(14);
-  text("Click buttons or use arrow keys • Space = Stop • Press Q to quit", centerX, height - 30);
+  textAlign(CENTER);
+  text("Press Q to quit and save data • Arrow keys to control • Space to stop", width/2, height - 20);
 }
 
-void drawDPad() {
-  // D-pad background circle
-  noStroke();
-  fill(255, 250, 255, 150);
-  ellipse(centerX, centerY, 250, 250);
+void drawCard(float x, float y, float w, float h, String title, String value, color cardColor) {
+  // Card background
+  fill(cardColor, 200);
+  rect(x, y, w, h, 20);
   
-  // Center circle
-  fill(255, 192, 203, 200);
-  ellipse(centerX, centerY, 100, 100);
+  // Title
+  fill(180, 120, 160);
+  textSize(20);
+  textAlign(LEFT, TOP);
+  text(title, x + 20, y + 20);
+  
+  // Value
   fill(255);
-  textSize(24);
-  text("STOP", centerX, centerY);
+  textSize(32);
+  textAlign(CENTER, CENTER);
+  text(value, x + w/2, y + h/2 + 10);
+}
+
+void drawEncoderCard(float x, float y, float w, float h) {
+  // Card background
+  fill(200, 230, 255, 200);
+  rect(x, y, w, h, 20);
   
-  // UP button
-  fill(isOverButton(centerX, centerY - 100, btnSize, btnSize) ? color(180, 220, 255) : color(173, 216, 230));
-  rect(centerX - btnSize/2, centerY - 100 - btnSize/2, btnSize, btnSize, 10);
+  // Title
+  fill(180, 120, 160);
+  textSize(20);
+  textAlign(LEFT, TOP);
+  text("📊 ENCODERS & DISTANCE", x + 20, y + 20);
+  
+  textSize(16);
+  textAlign(LEFT);
+  fill(100, 100, 150);
+  
+  // Left encoder
+  text("Left Wheel:", x + 30, y + 70);
   fill(255);
   textSize(20);
-  text("↑", centerX, centerY - 100);
+  text(leftCount + " ticks", x + 180, y + 70);
+  text(nf(leftDist, 0, 2) + " cm", x + 180, y + 100);
   
-  // DOWN button
-  fill(isOverButton(centerX, centerY + 100, btnSize, btnSize) ? color(180, 220, 255) : color(173, 216, 230));
-  rect(centerX - btnSize/2, centerY + 100 - btnSize/2, btnSize, btnSize, 10);
-  fill(255);
-  text("↓", centerX, centerY + 100);
-  
-  // LEFT button
-  fill(isOverButton(centerX - 100, centerY, btnSize, btnSize) ? color(180, 220, 255) : color(173, 216, 230));
-  rect(centerX - 100 - btnSize/2, centerY - btnSize/2, btnSize, btnSize, 10);
-  fill(255);
-  text("←", centerX - 100, centerY);
-  
-  // RIGHT button
-  fill(isOverButton(centerX + 100, centerY, btnSize, btnSize) ? color(180, 220, 255) : color(173, 216, 230));
-  rect(centerX + 100 - btnSize/2, centerY - btnSize/2, btnSize, btnSize, 10);
-  fill(255);
-  text("→", centerX + 100, centerY);
-}
-
-void drawSpeedSlider() {
-  // Speed control background
-  noStroke();
-  fill(255, 245, 250, 200);
-  rect(50, speedSliderY - 40, width - 100, 120, 15);
-  
-  fill(180, 120, 160);
-  textSize(18);
-  textAlign(CENTER);
-  text("SPEED CONTROL", centerX, speedSliderY - 10);
-  
-  // Slider track
-  fill(220, 200, 220);
-  rect(speedSliderX, speedSliderY + 20, width - 200, 20, 10);
-  
-  // Slider handle
-  float sliderPos = map(currentSpeed, 0, 9, speedSliderX, speedSliderX + width - 200);
-  fill(255, 182, 193);
-  stroke(255);
-  strokeWeight(2);
-  ellipse(sliderPos, speedSliderY + 30, 40, 40);
-  
-  // Speed numbers
-  noStroke();
-  fill(150, 100, 140);
-  textSize(14);
-  for (int i = 0; i <= 9; i++) {
-    float x = map(i, 0, 9, speedSliderX, speedSliderX + width - 200);
-    text(i, x, speedSliderY + 65);
-  }
-}
-
-void drawModeButtons() {
-  textAlign(CENTER, CENTER);
+  fill(100, 100, 150);
   textSize(16);
   
-  // Manual mode button
-  float manBtnX = width/2 - 100;
-  float manBtnY = 700;
-  fill(isOverButton(manBtnX, manBtnY, 140, 50) ? color(200, 240, 200) : color(180, 248, 200));
-  rect(manBtnX - 70, manBtnY - 25, 140, 50, 10);
+  // Right encoder
+  text("Right Wheel:", x + 30, y + 140);
   fill(255);
-  text("MANUAL", manBtnX, manBtnY);
+  textSize(20);
+  text(rightCount + " ticks", x + 180, y + 140);
+  text(nf(rightDist, 0, 2) + " cm", x + 180, y + 170);
   
-  // Auto mode button
-  float autoBtnX = width/2 + 100;
-  float autoBtnY = 700;
-  fill(isOverButton(autoBtnX, autoBtnY, 140, 50) ? color(255, 220, 180) : color(255, 200, 150));
-  rect(autoBtnX - 70, autoBtnY - 25, 140, 50, 10);
-  fill(255);
-  text("AUTO", autoBtnX, autoBtnY);
+  // Visual bars
+  float maxDist = 500; // Max distance for visualization
+  float leftBarWidth = map(constrain(leftDist, 0, maxDist), 0, maxDist, 0, w - 60);
+  float rightBarWidth = map(constrain(rightDist, 0, maxDist), 0, maxDist, 0, w - 60);
+  
+  fill(255, 182, 193);
+  rect(x + 30, y + 210, leftBarWidth, 10, 5);
+  
+  fill(173, 216, 230);
+  rect(x + 30, y + 225, rightBarWidth, 10, 5);
 }
 
-boolean isOverButton(float x, float y, float w, float h) {
-  return mouseX > x - w/2 && mouseX < x + w/2 && 
-         mouseY > y - h/2 && mouseY < y + h/2;
+void drawSpeedCard(float x, float y, float w, float h) {
+  // Card background
+  fill(230, 255, 230, 200);
+  rect(x, y, w, h, 20);
+  
+  // Title
+  fill(180, 120, 160);
+  textSize(20);
+  textAlign(LEFT, TOP);
+  text("🏃 SPEED", x + 20, y + 20);
+  
+  textSize(16);
+  textAlign(LEFT);
+  fill(100, 150, 100);
+  
+  text("Left:", x + 30, y + 70);
+  fill(255);
+  textSize(28);
+  text(nf(leftSpeed, 0, 2) + " cm/s", x + 120, y + 70);
+  
+  fill(100, 150, 100);
+  textSize(16);
+  text("Right:", x + 30, y + 130);
+  fill(255);
+  textSize(28);
+  text(nf(rightSpeed, 0, 2) + " cm/s", x + 120, y + 130);
+}
+
+void drawUltrasonicCard(float x, float y, float w, float h) {
+  // Card background
+  fill(255, 240, 220, 200);
+  rect(x, y, w, h, 20);
+  
+  // Title
+  fill(180, 120, 160);
+  textSize(20);
+  textAlign(LEFT, TOP);
+  text("📡 ULTRASONIC SENSORS", x + 20, y + 20);
+  
+  // Sensor 1
+  fill(150, 100, 80);
+  textSize(16);
+  textAlign(LEFT);
+  text("Sensor 1 (Front):", x + 30, y + 70);
+  
+  fill(255);
+  textSize(32);
+  text(ultrasonic1 + " cm", x + 220, y + 70);
+  
+  // Visual distance bar 1
+  float maxRange = 100; // Max range in cm
+  float bar1Width = map(constrain(ultrasonic1, 0, maxRange), 0, maxRange, 0, w - 60);
+  fill(255, 200, 150);
+  rect(x + 30, y + 110, bar1Width, 20, 10);
+  
+  // Sensor 2
+  fill(150, 100, 80);
+  textSize(16);
+  text("Sensor 2 (Side):", x + 30, y + 160);
+  
+  fill(255);
+  textSize(32);
+  text(ultrasonic2 + " cm", x + 220, y + 160);
+  
+  // Visual distance bar 2
+  float bar2Width = map(constrain(ultrasonic2, 0, maxRange), 0, maxRange, 0, w - 60);
+  fill(200, 180, 255);
+  rect(x + 30, y + 200, bar2Width, 20, 10);
 }
 
 void serialEvent(Serial p) {
   String line = trim(p.readStringUntil('\n'));
   if (line == null || line.length() == 0) return;
   
-  // Write telemetry to CSV
-  out.println(line);
-  out.flush();
+  // Skip header and separator lines
+  if (line.startsWith("=") || line.startsWith("🤖") || line.startsWith("⏱️") || 
+      line.startsWith("📊") || line.startsWith("📏") || line.startsWith("🏃") || 
+      line.startsWith("📡") || line.startsWith("   ") || line.startsWith("🎮")) {
+    return;
+  }
+  
+  // Try to parse as CSV format (if you modify Arduino to send CSV)
+  String[] parts = split(line, ',');
+  if (parts.length >= 9) {
+    try {
+      timeMs = int(trim(parts[0]));
+      leftCount = int(trim(parts[1]));
+      rightCount = int(trim(parts[2]));
+      leftDist = float(trim(parts[3]));
+      rightDist = float(trim(parts[4]));
+      leftSpeed = float(trim(parts[5]));
+      rightSpeed = float(trim(parts[6]));
+      ultrasonic1 = int(trim(parts[7]));
+      ultrasonic2 = int(trim(parts[8]));
+      if (parts.length > 9) {
+        currentCommand = trim(parts[9]);
+      }
+      
+      // Write to CSV
+      out.println(line);
+      out.flush();
+    } catch (Exception e) {
+      // Parsing failed, skip this line
+    }
+  }
   
   // Display in console
   println(line);
 }
 
-void mousePressed() {
-  if (!connected) return;
-  
-  // D-pad buttons
-  if (isOverButton(centerX, centerY - 100, btnSize, btnSize)) {
-    sendCommand('F', "FORWARD");
-  }
-  else if (isOverButton(centerX, centerY + 100, btnSize, btnSize)) {
-    sendCommand('B', "BACKWARD");
-  }
-  else if (isOverButton(centerX - 100, centerY, btnSize, btnSize)) {
-    sendCommand('L', "LEFT");
-  }
-  else if (isOverButton(centerX + 100, centerY, btnSize, btnSize)) {
-    sendCommand('R', "RIGHT");
-  }
-  else if (dist(mouseX, mouseY, centerX, centerY) < 50) {
-    sendCommand('S', "STOP");
-  }
-  
-  // Mode buttons
-  if (isOverButton(width/2 - 100, 700, 140, 50)) {
-    sendCommand('M', "MANUAL MODE");
-  }
-  else if (isOverButton(width/2 + 100, 700, 140, 50)) {
-    sendCommand('A', "AUTO MODE");
-  }
-  
-  // Speed slider
-  if (mouseY > speedSliderY + 10 && mouseY < speedSliderY + 50 &&
-      mouseX > speedSliderX && mouseX < speedSliderX + width - 200) {
-    int newSpeed = int(map(mouseX, speedSliderX, speedSliderX + width - 200, 0, 9));
-    currentSpeed = constrain(newSpeed, 0, 9);
-    sendCommand(char('0' + currentSpeed), "Speed: " + currentSpeed);
-  }
-}
-
-void mouseDragged() {
-  // Allow dragging the speed slider
-  if (mouseY > speedSliderY && mouseY < speedSliderY + 80 &&
-      mouseX > speedSliderX && mouseX < speedSliderX + width - 200) {
-    int newSpeed = int(map(mouseX, speedSliderX, speedSliderX + width - 200, 0, 9));
-    if (newSpeed != currentSpeed) {
-      currentSpeed = constrain(newSpeed, 0, 9);
-      sendCommand(char('0' + currentSpeed), "Speed: " + currentSpeed);
-    }
-  }
-}
-
-void mouseReleased() {
-  // Auto-stop when releasing direction buttons (optional)
-  if (isOverButton(centerX, centerY - 100, btnSize, btnSize) ||
-      isOverButton(centerX, centerY + 100, btnSize, btnSize) ||
-      isOverButton(centerX - 100, centerY, btnSize, btnSize) ||
-      isOverButton(centerX + 100, centerY, btnSize, btnSize)) {
-    sendCommand('S', "STOP");
-  }
-}
-
 void keyPressed() {
-  if (!connected) return;
-  
   if (key == 'q' || key == 'Q') {
     out.flush();
     out.close();
     exit();
   }
   
-  // Arrow keys
+  if (!connected) return;
+  
+  // Forward
   if (keyCode == UP) {
-    sendCommand('F', "FORWARD");
+    port.write('F');
+    currentCommand = "FORWARD ⬆️";
   }
+  // Backward
   else if (keyCode == DOWN) {
-    sendCommand('B', "BACKWARD");
+    port.write('B');
+    currentCommand = "BACKWARD ⬇️";
   }
+  // Left
   else if (keyCode == LEFT) {
-    sendCommand('L', "LEFT");
+    port.write('L');
+    currentCommand = "LEFT ⬅️";
   }
+  // Right
   else if (keyCode == RIGHT) {
-    sendCommand('R', "RIGHT");
+    port.write('R');
+    currentCommand = "RIGHT ➡️";
   }
+  // Stop
   else if (key == ' ') {
-    sendCommand('S', "STOP");
+    port.write('S');
+    currentCommand = "STOP 🛑";
   }
-  // Speed numbers
+  // Speed control
   else if (key >= '0' && key <= '9') {
-    currentSpeed = int(str(key));
-    sendCommand(key, "Speed: " + currentSpeed);
-  }
-  // Mode controls
-  else if (key == 'm' || key == 'M') {
-    sendCommand('M', "MANUAL MODE");
-  }
-  else if (key == 'a' || key == 'A') {
-    sendCommand('A', "AUTO MODE");
+    port.write(key);
+    currentCommand = "Speed: " + key;
   }
 }
 
 void keyReleased() {
-  // Auto-stop when releasing arrow keys (optional)
+  // Auto-stop when releasing arrow keys
   if (keyCode == UP || keyCode == DOWN || keyCode == LEFT || keyCode == RIGHT) {
-    sendCommand('S', "STOP");
-  }
-}
-
-void sendCommand(char cmd, String display) {
-  if (connected) {
-    port.write(cmd);
-    currentCommand = display;
+    port.write('S');
+    currentCommand = "STOP 🛑";
   }
 }
