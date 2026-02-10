@@ -261,18 +261,20 @@ void followWall() {
 void goForward() {
   digitalWrite(in1, LOW);
   digitalWrite(in2, HIGH);
+  analogWrite(enA, baseSpeed * leftTrim);
+  
   digitalWrite(in3, LOW);
   digitalWrite(in4, HIGH);
-  analogWrite(enA, baseSpeed * leftTrim);
   analogWrite(enB, baseSpeed * rightTrim);
 }
 
 void goBackward() {
   digitalWrite(in1, HIGH);
   digitalWrite(in2, LOW);
+  analogWrite(enA, baseSpeed * leftTrim);
+  
   digitalWrite(in3, HIGH);
   digitalWrite(in4, LOW);
-  analogWrite(enA, baseSpeed * leftTrim);
   analogWrite(enB, baseSpeed * rightTrim);
 }
 
@@ -288,9 +290,21 @@ void turnLeft() {
 void turnRight() {
   digitalWrite(in1, LOW);
   digitalWrite(in2, HIGH);
+  analogWrite(enA, baseSpeed * leftTrim);
+  
   digitalWrite(in3, HIGH);
   digitalWrite(in4, LOW);
   analogWrite(enA, baseSpeed * leftTrim);
+  analogWrite(enB, baseSpeed * rightTrim);
+}
+
+void turnLeft() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, HIGH);
+  analogWrite(enA, baseSpeed * leftTrim);
+  
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
   analogWrite(enB, baseSpeed * rightTrim);
 }
 
