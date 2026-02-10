@@ -1,0 +1,295 @@
+#include <WiFiS3.h>
+
+// ========== HOTSPOT CREDENTIALS ==========
+const char* ssid = "ZoePhone";        // Replace with your hotspot name
+const char* password = "password";     // Replace with your hotspot password
+
+WiFiServer server(80);  // Web server on port 80
+
+// ========== MOTOR PINS ==========
+int enA = 9;
+int in1 = 8;
+int in2 = 7;
+int enB = 10;
+int in3 = 12;
+int in4 = 13;
+int speed = 200;
+
+// Motor trim (adjust these to fix veering)
+float leftTrim = 0.6;
+float rightTrim = 1.0;
+
+// ========== ULTRASONIC SENSOR 1 (Front/Side) ==========
+const int trigPin1 = 4;
+const int echoPin1 = 5;
+long duration1, cm1;
+
+// ========== ULTRASONIC SENSOR 2 (Front/Side) ==========
+const int trigPin2 = 6;
+const int echoPin2 = 11;
+long duration2, cm2;
+
+// For periodic sensor reading
+unsigned long lastSensorRead = 0;
+
+void setup() {
+  // Motor setup
+  pinMode(enA, OUTPUT); 
+  pinMode(in1, OUTPUT); 
+  pinMode(in2, OUTPUT);
+  pinMode(enB, OUTPUT); 
+  pinMode(in3, OUTPUT); 
+  pinMode(in4, OUTPUT);
+
+  // MAKE SURE MOTORS START STOPPED
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+  analogWrite(enA, 0);
+  analogWrite(enB, 0);
+
+  // Ultrasonic 1 setup
+  pinMode(trigPin1, OUTPUT);
+  pinMode(echoPin1, INPUT);
+
+  // Ultrasonic 2 setup
+  pinMode(trigPin2, OUTPUT);
+  pinMode(echoPin2, INPUT);
+
+  Serial.begin(9600);
+  delay(2000);
+  
+  Serial.println("========================================");
+  Serial.println("ROBOT CONTROL - Hotspot Mode");
+  Serial.println("========================================");
+  Serial.println();
+
+  // Connect to Hotspot
+  Serial.print("Connecting to hotspot: ");
+  Serial.println(ssid);
+  
+  WiFi.begin(ssid, password);
+  
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  
+  Serial.println();
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("Connected to Hotspot!");
+    Serial.println();
+    Serial.println("========================================");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+    Serial.println("========================================");
+    Serial.println();
+    
+    server.begin();
+  } else {
+    Serial.println("Failed to connect to hotspot");
+  }
+}
+
+void loop() {
+  // ========== READ ULTRASONIC SENSORS (every 200ms only) ==========
+  unsigned long currentTime = millis();
+  if (currentTime - lastSensorRead >= 200) {
+    // Read Sensor 1
+    digitalWrite(trigPin1, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trigPin1, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trigPin1, LOW);
+    
+    duration1 = pulseIn(echoPin1, HIGH, 30000);  // 30ms timeout
+    cm1 = (duration1 == 0) ? 0 : (duration1 / 2) / 29.1;
+
+    delayMicroseconds(10);
+
+    // Read Sensor 2
+    digitalWrite(trigPin2, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trigPin2, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trigPin2, LOW);
+    
+    duration2 = pulseIn(echoPin2, HIGH, 30000);  // 30ms timeout
+    cm2 = (duration2 == 0) ? 0 : (duration2 / 2) / 29.1;
+    
+    lastSensorRead = currentTime;
+  }
+
+  // ========== HANDLE WIFI CLIENTS ==========
+  WiFiClient client = server.available();
+  
+  if (client) {
+    String currentLine = "";
+    
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        
+        if (c == '\n') {
+          if (currentLine.length() == 0) {
+            // Send HTTP response
+            sendWebPage(client);
+            break;
+          } else {
+            // Process GET request
+            if (currentLine.indexOf("GET /F") >= 0) {
+              Serial.println("FORWARD");
+              drive(LOW, HIGH, LOW, HIGH);
+            }
+            else if (currentLine.indexOf("GET /B") >= 0) {
+              Serial.println("BACKWARD");
+              drive(HIGH, LOW, HIGH, LOW);
+            }
+            else if (currentLine.indexOf("GET /L") >= 0) {
+              Serial.println("LEFT");
+              drive(HIGH, LOW, LOW, HIGH);
+            }
+            else if (currentLine.indexOf("GET /R") >= 0) {
+              Serial.println("RIGHT");
+              drive(LOW, HIGH, HIGH, LOW);
+            }
+            else if (currentLine.indexOf("GET /S") >= 0) {
+              Serial.println("STOP");
+              drive(LOW, LOW, LOW, LOW);
+            }
+            else if (currentLine.indexOf("GET /data") >= 0) {
+              // Send JSON telemetry data
+              sendTelemetryJSON(client);
+              client.stop();
+              return;
+            }
+            currentLine = "";
+          }
+        } else if (c != '\r') {
+          currentLine += c;
+        }
+      }
+    }
+    client.stop();
+  }
+
+  // ========== HANDLE SERIAL COMMANDS ==========
+  if (Serial.available() > 0) {
+    char cmd = Serial.read();
+    
+    if (cmd == 'F') {
+      Serial.println("Serial: FORWARD");
+      drive(LOW, HIGH, LOW, HIGH);
+    }
+    else if (cmd == 'B') {
+      Serial.println("Serial: BACKWARD");
+      drive(HIGH, LOW, HIGH, LOW);
+    }
+    else if (cmd == 'L') {
+      Serial.println("Serial: LEFT");
+      drive(HIGH, LOW, LOW, HIGH);
+    }
+    else if (cmd == 'R') {
+      Serial.println("Serial: RIGHT");
+      drive(LOW, HIGH, HIGH, LOW);
+    }
+    else if (cmd == 'S') {
+      Serial.println("Serial: STOP");
+      drive(LOW, LOW, LOW, LOW);
+    }
+    else if (cmd >= '0' && cmd <= '9') {
+      int val = cmd - '0';
+      speed = map(val, 0, 9, 100, 255);
+      Serial.print("Speed set to: ");
+      Serial.println(val);
+    }
+  }
+
+  delay(10);
+}
+
+// ========== DRIVE FUNCTION ==========
+void drive(int a1, int a2, int b1, int b2) {
+  digitalWrite(in1, a1);
+  digitalWrite(in2, a2);
+  analogWrite(enA, (a1 == a2) ? 0 : speed * leftTrim); 
+
+  digitalWrite(in3, b2);
+  digitalWrite(in4, b1);
+  analogWrite(enB, (b1 == b2) ? 0 : speed * rightTrim);
+}
+
+// ========== SEND WEB PAGE ==========
+void sendWebPage(WiFiClient &client) {
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-type:text/html");
+  client.println();
+  
+  // HTML page with controls
+  client.println("<!DOCTYPE html>");
+  client.println("<html>");
+  client.println("<head>");
+  client.println("<meta name='viewport' content='width=device-width, initial-scale=1'>");
+  client.println("<title>Robot Control</title>");
+  client.println("<style>");
+  client.println("body { font-family: Arial; text-align: center; background: #1e1e1e; color: #fff; margin: 0; padding: 20px; }");
+  client.println("h1 { color: #4CAF50; font-size: 32px; }");
+  client.println(".controls { margin: 30px auto; max-width: 400px; }");
+  client.println(".btn { background: #4CAF50; border: none; color: white; padding: 15px 25px; font-size: 18px; font-weight: bold; margin: 8px; cursor: pointer; border-radius: 10px; min-width: 120px; }");
+  client.println(".btn:active { background: #45a049; transform: scale(0.95); }");
+  client.println(".stop { background: #f44336; font-size: 20px; }");
+  client.println(".stop:active { background: #da190b; }");
+  client.println(".row { display: flex; justify-content: center; margin: 10px 0; }");
+  client.println(".telemetry { background: #2d2d2d; padding: 20px; margin: 30px auto; max-width: 400px; border-radius: 10px; }");
+  client.println(".sensor { margin: 15px 0; font-size: 20px; font-weight: bold; }");
+  client.println(".sensor-label { color: #4CAF50; }");
+  client.println(".sensor-value { color: #fff; font-size: 24px; }");
+  client.println("</style>");
+  client.println("</head>");
+  client.println("<body>");
+  client.println("<h1>Robot Control</h1>");
+  
+  client.println("<div class='controls'>");
+  client.println("<div class='row'><button class='btn' onclick='send(\"F\")'>FORWARD</button></div>");
+  client.println("<div class='row'>");
+  client.println("<button class='btn' onclick='send(\"L\")'>LEFT</button>");
+  client.println("<button class='btn stop' onclick='send(\"S\")'>STOP</button>");
+  client.println("<button class='btn' onclick='send(\"R\")'>RIGHT</button>");
+  client.println("</div>");
+  client.println("<div class='row'><button class='btn' onclick='send(\"B\")'>BACK</button></div>");
+  client.println("</div>");
+  
+  client.println("<div class='telemetry'>");
+  client.println("<h2 style='color: #4CAF50; margin-top: 0;'>Sensor Readings</h2>");
+  client.println("<div class='sensor'><span class='sensor-label'>Sensor 1:</span> <span class='sensor-value' id='s1'>--</span> cm</div>");
+  client.println("<div class='sensor'><span class='sensor-label'>Sensor 2:</span> <span class='sensor-value' id='s2'>--</span> cm</div>");
+  client.println("</div>");
+  
+  client.println("<script>");
+  client.println("function send(cmd) { fetch('/' + cmd); }");
+  client.println("setInterval(() => {");
+  client.println("  fetch('/data').then(r => r.json()).then(d => {");
+  client.println("    document.getElementById('s1').textContent = d.s1;");
+  client.println("    document.getElementById('s2').textContent = d.s2;");
+  client.println("  }).catch(e => console.log('Error fetching data'));");
+  client.println("}, 500);");
+  client.println("</script>");
+  
+  client.println("</body></html>");
+}
+
+// ========== SEND TELEMETRY JSON ==========
+void sendTelemetryJSON(WiFiClient &client) {
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-type:application/json");
+  client.println();
+  client.print("{\"s1\":");
+  client.print(cm1);
+  client.print(",\"s2\":");
+  client.print(cm2);
+  client.println("}");
+}
