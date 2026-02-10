@@ -29,10 +29,17 @@ long cm1, cm2;
 bool autonomousMode = false;
 int baseSpeed = 180;
 
-// Wall following parameters - SIMPLIFIED
+// Wall following parameters
 int wallMinDistance = 20;      // Too close to wall
 int wallMaxDistance = 40;      // Too far from wall  
 int noWallThreshold = 50;      // No wall detected
+
+// ========== CORNER DETECTION ==========
+int frontObstacleThreshold = 25;  // Obstacle in front (inside corner)
+int outsideCornerThreshold = 60;  // Wall disappeared (outside corner)
+unsigned long cornerStartTime = 0;
+bool turningCorner = false;
+int turnDuration = 800;  // ms to turn 90 degrees (adjust based on testing!)
 
 void setup() {
   pinMode(enA, OUTPUT);
@@ -57,7 +64,7 @@ void setup() {
   Serial.begin(9600);
   delay(2000);
   Serial.println("========================================");
-  Serial.println("WALL FOLLOWER - RIGHT SIDE");
+  Serial.println("WALL FOLLOWER - RIGHT SIDE WITH CORNERS");
   Serial.println("========================================");
 
   Serial.print("Connecting to: ");
@@ -101,9 +108,16 @@ void loop() {
   long duration2 = pulseIn(echoPin2, HIGH, 30000);
   cm2 = (duration2 == 0) ? 999 : (duration2 / 2) / 29.1;
 
-  // ========== AUTONOMOUS WALL FOLLOWING ==========
+  // Print sensor readings for debugging
+  Serial.print("Front: ");
+  Serial.print(cm1);
+  Serial.print(" cm | Right: ");
+  Serial.print(cm2);
+  Serial.print(" cm | ");
+
+  // ========== AUTONOMOUS WALL FOLLOWING WITH CORNERS ==========
   if (autonomousMode) {
-    followWall();
+    followWallWithCorners();
   }
 
   // ========== WIFI CONTROL ==========
@@ -157,186 +171,193 @@ void loop() {
     client.stop();
   }
 
-  delay(50);  // Small delay for sensor stability
+  delay(50);
 }
 
-// ========== WALL FOLLOWING LOGIC ==========
-void followWall() {
-  // PRIORITY 1: Front obstacle - turn left
-  if (cm1 < 25 && cm1 > 0) {
-    Serial.println("FRONT BLOCKED! Turning left");
+// ========== WALL FOLLOWING WITH CORNER DETECTION ==========
+void followWallWithCorners() {
+  
+  // ========== CASE 1: INSIDE CORNER (wall in front) ==========
+  if (cm1 < frontObstacleThreshold) {
+    Serial.println("State: INSIDE CORNER - Turning LEFT");
+    
+    // Stop briefly
+    stopMotors();
+    delay(200);
+    
+    // Turn left 90 degrees
     turnLeft();
+    delay(turnDuration);
+    
+    // Stop after turn
+    stopMotors();
+    delay(200);
+    
     return;
   }
-
-  // PRIORITY 2: NO WALL ON RIGHT - Turn right AGGRESSIVELY and KEEP TURNING
-  if (cm2 >= noWallThreshold || cm2 == 999) {
-    Serial.print("NO WALL (");
-    Serial.print(cm2);
-    Serial.println("cm) - TURNING RIGHT");
+  
+  // ========== CASE 2: OUTSIDE CORNER (wall disappeared on right) ==========
+  if (cm2 > outsideCornerThreshold) {
+    Serial.println("State: OUTSIDE CORNER - Wall disappeared, turning RIGHT");
     
-    // SHARP right turn - both motors working to turn fast
-    digitalWrite(in1, LOW);
-    digitalWrite(in2, HIGH);
-    analogWrite(enA, baseSpeed * leftTrim);  // Left forward FULL
+    // Move forward a bit to clear the corner
+    goForward();
+    delay(400);
     
-    digitalWrite(in3, HIGH);
-    digitalWrite(in4, LOW);
-    analogWrite(enB, baseSpeed * rightTrim);  // Right BACKWARD FULL - sharp turn!
+    // Turn right 90 degrees
+    turnRight();
+    delay(turnDuration);
+    
+    // Stop after turn
+    stopMotors();
+    delay(200);
+    
     return;
   }
-
-  // PRIORITY 3: Wall too close - steer away (left)
-  if (cm2 < wallMinDistance) {
-    Serial.print("TOO CLOSE (");
-    Serial.print(cm2);
-    Serial.println("cm) - steer LEFT");
-    
-    digitalWrite(in1, LOW);
-    digitalWrite(in2, HIGH);
-    analogWrite(enA, baseSpeed * leftTrim);  // Left full
-    
-    digitalWrite(in3, LOW);
-    digitalWrite(in4, HIGH);
-    analogWrite(enB, (baseSpeed * 0.4) * rightTrim);  // Right slow
-    return;
-  }
-
-  // PRIORITY 4: Wall too far - steer toward it (right)
-  if (cm2 > wallMaxDistance) {
-    Serial.print("TOO FAR (");
-    Serial.print(cm2);
-    Serial.println("cm) - steer RIGHT");
-    
-    digitalWrite(in1, LOW);
-    digitalWrite(in2, HIGH);
-    analogWrite(enA, (baseSpeed * 0.4) * leftTrim);  // Left slow
-    
-    digitalWrite(in3, LOW);
-    digitalWrite(in4, HIGH);
-    analogWrite(enB, baseSpeed * rightTrim);  // Right full
-    return;
-  }
-
-  // PRIORITY 5: Perfect distance - go straight
-  Serial.print("PERFECT (");
-  Serial.print(cm2);
-  Serial.println("cm) - STRAIGHT");
-  goForward();
+  
+  // ========== CASE 3: NORMAL WALL FOLLOWING (straight wall) ==========
+  followWall();
 }
 
-// ========== MOVEMENT FUNCTIONS ==========
+// ========== BASIC WALL FOLLOWING ==========
+void followWall() {
+  
+  // Too close to wall - steer away (turn left slightly)
+  if (cm2 < wallMinDistance) {
+    Serial.println("State: TOO CLOSE - Steering left");
+    digitalWrite(in1, LOW);
+    digitalWrite(in2, HIGH);
+    digitalWrite(in3, LOW);
+    digitalWrite(in4, HIGH);
+    analogWrite(enA, baseSpeed * leftTrim * 0.7);  // Left motor slower
+    analogWrite(enB, baseSpeed * rightTrim);        // Right motor normal
+  }
+  
+  // Too far from wall - steer closer (turn right slightly)
+  else if (cm2 > wallMaxDistance && cm2 < noWallThreshold) {
+    Serial.println("State: TOO FAR - Steering right");
+    digitalWrite(in1, LOW);
+    digitalWrite(in2, HIGH);
+    digitalWrite(in3, LOW);
+    digitalWrite(in4, HIGH);
+    analogWrite(enA, baseSpeed * leftTrim);         // Left motor normal
+    analogWrite(enB, baseSpeed * rightTrim * 0.7);  // Right motor slower
+  }
+  
+  // Perfect distance - go straight
+  else if (cm2 >= wallMinDistance && cm2 <= wallMaxDistance) {
+    Serial.println("State: PERFECT - Going straight");
+    goForward();
+  }
+  
+  // No wall detected - just go forward
+  else {
+    Serial.println("State: NO WALL - Going forward");
+    goForward();
+  }
+}
+
+// ========== MOTOR CONTROL FUNCTIONS ==========
 void goForward() {
   digitalWrite(in1, LOW);
   digitalWrite(in2, HIGH);
-  analogWrite(enA, baseSpeed * leftTrim);
-  
   digitalWrite(in3, LOW);
   digitalWrite(in4, HIGH);
+  analogWrite(enA, baseSpeed * leftTrim);
   analogWrite(enB, baseSpeed * rightTrim);
 }
 
 void goBackward() {
   digitalWrite(in1, HIGH);
   digitalWrite(in2, LOW);
-  analogWrite(enA, baseSpeed * leftTrim);
-  
   digitalWrite(in3, HIGH);
   digitalWrite(in4, LOW);
+  analogWrite(enA, baseSpeed * leftTrim);
   analogWrite(enB, baseSpeed * rightTrim);
 }
 
 void turnLeft() {
   digitalWrite(in1, HIGH);
   digitalWrite(in2, LOW);
-  analogWrite(enA, baseSpeed * leftTrim);
-  
   digitalWrite(in3, LOW);
   digitalWrite(in4, HIGH);
+  analogWrite(enA, baseSpeed * leftTrim);
   analogWrite(enB, baseSpeed * rightTrim);
 }
 
 void turnRight() {
   digitalWrite(in1, LOW);
   digitalWrite(in2, HIGH);
-  analogWrite(enA, baseSpeed * leftTrim);
-  
   digitalWrite(in3, HIGH);
   digitalWrite(in4, LOW);
+  analogWrite(enA, baseSpeed * leftTrim);
   analogWrite(enB, baseSpeed * rightTrim);
 }
 
 void stopMotors() {
   digitalWrite(in1, LOW);
   digitalWrite(in2, LOW);
-  analogWrite(enA, 0);
-  
   digitalWrite(in3, LOW);
   digitalWrite(in4, LOW);
+  analogWrite(enA, 0);
   analogWrite(enB, 0);
 }
 
 // ========== WEB PAGE ==========
 void sendWebPage(WiFiClient &client) {
   client.println("HTTP/1.1 200 OK");
-  client.println("Content-type:text/html");
+  client.println("Content-Type: text/html");
   client.println();
   
   client.println("<!DOCTYPE html><html><head>");
   client.println("<meta name='viewport' content='width=device-width, initial-scale=1'>");
-  client.println("<title>Wall Follower</title>");
   client.println("<style>");
-  client.println("body{font-family:Arial;text-align:center;background:#1e1e1e;color:#fff;padding:20px}");
-  client.println("h1{color:#4CAF50}");
-  client.println(".mode-btn{background:#2196F3;border:none;color:white;padding:20px 40px;font-size:20px;margin:10px;border-radius:10px;width:200px}");
-  client.println(".mode-btn.active{background:#ff9800}");
-  client.println(".btn{background:#4CAF50;border:none;color:white;padding:15px 25px;font-size:18px;margin:8px;border-radius:10px;min-width:120px}");
-  client.println(".stop{background:#f44336}");
-  client.println(".row{display:flex;justify-content:center;margin:10px 0}");
-  client.println(".telemetry{background:#2d2d2d;padding:20px;margin:30px auto;max-width:400px;border-radius:10px}");
-  client.println(".sensor{margin:15px 0;font-size:20px}");
-  client.println("</style></head><body>");
-  
-  client.println("<h1>🤖 Wall Follower</h1>");
-  client.println("<div><button class='mode-btn' id='autoBtn' onclick='setAuto(true)'>AUTONOMOUS</button>");
-  client.println("<button class='mode-btn active' id='manualBtn' onclick='setAuto(false)'>MANUAL</button></div>");
-  
-  client.println("<div id='controls'>");
-  client.println("<div class='row'><button class='btn' onclick='send(\"F\")'>FORWARD</button></div>");
-  client.println("<div class='row'><button class='btn' onclick='send(\"L\")'>LEFT</button>");
-  client.println("<button class='btn stop' onclick='send(\"S\")'>STOP</button>");
-  client.println("<button class='btn' onclick='send(\"R\")'>RIGHT</button></div>");
-  client.println("<div class='row'><button class='btn' onclick='send(\"B\")'>BACK</button></div></div>");
-  
-  client.println("<div class='telemetry'><h2>Sensors</h2>");
-  client.println("<div class='sensor'>Front: <span id='s1'>--</span> cm</div>");
-  client.println("<div class='sensor'>Right: <span id='s2'>--</span> cm</div>");
-  client.println("<div style='margin-top:15px;padding:10px;background:#3d3d3d;border-radius:5px;font-size:14px'>");
-  client.println("Target: 20-40cm | No Wall: >50cm</div></div>");
-  
+  client.println("body { font-family: Arial; text-align: center; background: linear-gradient(to bottom, #ffeef8, #e6f0ff); margin: 0; padding: 20px; }");
+  client.println("h1 { color: #b478ac; }");
+  client.println(".btn { background: #ffb6d9; border: none; color: white; padding: 20px 40px; font-size: 20px; margin: 10px; border-radius: 15px; cursor: pointer; }");
+  client.println(".btn:active { background: #ff8fc7; }");
+  client.println(".auto { background: #a8d8ff; }");
+  client.println(".auto:active { background: #7bc5ff; }");
+  client.println(".stop { background: #ffa6a6; }");
+  client.println(".data { background: #d4f1d4; padding: 10px; margin: 20px; border-radius: 10px; }");
+  client.println("</style>");
   client.println("<script>");
-  client.println("function send(c){fetch('/'+c)}");
-  client.println("function setAuto(m){");
-  client.println("  fetch(m?'/AUTO_ON':'/AUTO_OFF');");
-  client.println("  document.getElementById('autoBtn').classList.toggle('active',m);");
-  client.println("  document.getElementById('manualBtn').classList.toggle('active',!m);");
-  client.println("}");
-  client.println("setInterval(()=>{");
-  client.println("  fetch('/data').then(r=>r.json()).then(d=>{");
-  client.println("    document.getElementById('s1').textContent=d.s1==999?'Clear':d.s1;");
-  client.println("    document.getElementById('s2').textContent=d.s2==999?'No wall':d.s2;");
-  client.println("  })");
-  client.println("},500);");
-  client.println("</script></body></html>");
+  client.println("setInterval(function() {");
+  client.println("  fetch('/data').then(r => r.json()).then(d => {");
+  client.println("    document.getElementById('front').innerText = d.front + ' cm';");
+  client.println("    document.getElementById('right').innerText = d.right + ' cm';");
+  client.println("  });");
+  client.println("}, 500);");
+  client.println("</script>");
+  client.println("</head><body>");
+  
+  client.println("<h1>🤖 Wall Follower Robot</h1>");
+  
+  client.println("<div class='data'>");
+  client.println("<p><strong>Front Sensor:</strong> <span id='front'>--</span></p>");
+  client.println("<p><strong>Right Sensor:</strong> <span id='right'>--</span></p>");
+  client.println("</div>");
+  
+  client.println("<button class='btn auto' onclick=\"location.href='/AUTO_ON'\">🤖 AUTO MODE ON</button>");
+  client.println("<button class='btn stop' onclick=\"location.href='/AUTO_OFF'\">✋ AUTO MODE OFF</button>");
+  client.println("<br>");
+  
+  client.println("<button class='btn' onclick=\"location.href='/F'\">⬆️ FORWARD</button><br>");
+  client.println("<button class='btn' onclick=\"location.href='/L'\">⬅️ LEFT</button>");
+  client.println("<button class='btn stop' onclick=\"location.href='/S'\">⏹️ STOP</button>");
+  client.println("<button class='btn' onclick=\"location.href='/R'\">➡️ RIGHT</button><br>");
+  client.println("<button class='btn' onclick=\"location.href='/B'\">⬇️ BACKWARD</button>");
+  
+  client.println("</body></html>");
 }
 
 void sendTelemetryJSON(WiFiClient &client) {
   client.println("HTTP/1.1 200 OK");
-  client.println("Content-type:application/json");
+  client.println("Content-Type: application/json");
   client.println();
-  client.print("{\"s1\":");
+  client.print("{\"front\":");
   client.print(cm1);
-  client.print(",\"s2\":");
+  client.print(",\"right\":");
   client.print(cm2);
   client.println("}");
 }
