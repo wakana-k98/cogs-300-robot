@@ -1,8 +1,8 @@
 #include <WiFiS3.h>
 
 // ========== HOTSPOT CREDENTIALS ==========
-const char* ssid = "ZoePhone";        // Replace with your hotspot name
-const char* password = "password";     // Replace with your hotspot password
+const char* ssid = "Brady";        // Replace with your hotspot name
+const char* password = "Brady2005";     // Replace with your hotspot password
 
 WiFiServer server(80);  // Web server on port 80
 
@@ -20,13 +20,13 @@ float leftTrim = 0.6;
 float rightTrim = 1.0;
 
 // ========== ULTRASONIC SENSOR 1 (Front/Side) ==========
-const int trigPin1 = 4;
-const int echoPin1 = 5;
+const int trigPin1 = 3;
+const int echoPin1 = 4;
 long duration1, cm1;
 
 // ========== ULTRASONIC SENSOR 2 (Front/Side) ==========
-const int trigPin2 = 6;
-const int echoPin2 = 11;
+const int trigPin2 = 5;
+const int echoPin2 = 6;
 long duration2, cm2;
 
 // For periodic sensor reading
