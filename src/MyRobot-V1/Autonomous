@@ -1,10 +1,10 @@
 #include <WiFiS3.h>
 
 // ========== HOTSPOT CREDENTIALS ==========
-const char* ssid = "Brady";        // Replace with your hotspot name
-const char* password = "Brady2005";     // Replace with your hotspot password
+const char* ssid = "Brady";
+const char* password = "Brady2005";
 
-WiFiServer server(80);  // Web server on port 80
+WiFiServer server(80);
 
 // ========== MOTOR PINS ==========
 int enA = 9;
@@ -15,39 +15,25 @@ int in3 = 12;
 int in4 = 13;
 int speed = 200;
 
-// Motor trim (adjust these to fix veering)
 float leftTrim = 0.6;
 float rightTrim = 1.0;
 
-// ========== ULTRASONIC SENSOR 1 (FRONT) ==========
-const int trigPin1 = 3;
+// ========== ULTRASONIC SENSORS ==========
+const int trigPin1 = 3;  // Front
 const int echoPin1 = 4;
-long duration1, cm1;
-
-// ========== ULTRASONIC SENSOR 2 (RIGHT SIDE) ==========
-const int trigPin2 = 5;
+const int trigPin2 = 5;  // Right side
 const int echoPin2 = 6;
-long duration2, cm2;
+long cm1, cm2;
 
 // ========== AUTONOMOUS MODE ==========
-bool autonomousMode = false;  // Start in manual mode
-int baseSpeed = 200;          // Full speed
-int currentSpeed = 200;
-int turnDuration90 = 300;     // Time for 90-degree turn (adjust this value!)
+bool autonomousMode = false;
+int baseSpeed = 180;
 
-// Wall following parameters (ADJUSTABLE)
-int targetWallDistance = 30;   // Target distance from right wall in cm
-int wallTooClose = 25;         // Too close to wall - steer left
-int wallTooFar = 35;           // Too far from wall - steer right
-int noWallDistance = 60;       // Distance considered "no wall on right"
-
-// Non-blocking timing for post-turn forward movement
-unsigned long forwardStartTime = 0;
-bool isMovingForward = false;
-const int forwardDuration = 800;
+// SIMPLE thresholds
+int wallDetected = 50;      // If right sensor < 50cm, wall is there
+int frontObstacle = 25;     // If front sensor < 25cm, obstacle ahead
 
 void setup() {
-  // Motor setup
   pinMode(enA, OUTPUT);
   pinMode(in1, OUTPUT);
   pinMode(in2, OUTPUT);
@@ -55,7 +41,6 @@ void setup() {
   pinMode(in3, OUTPUT);
   pinMode(in4, OUTPUT);
 
-  // MAKE SURE MOTORS START STOPPED
   digitalWrite(in1, LOW);
   digitalWrite(in2, LOW);
   digitalWrite(in3, LOW);
@@ -63,25 +48,19 @@ void setup() {
   analogWrite(enA, 0);
   analogWrite(enB, 0);
 
-  // Ultrasonic 1 setup
   pinMode(trigPin1, OUTPUT);
   pinMode(echoPin1, INPUT);
-
-  // Ultrasonic 2 setup
   pinMode(trigPin2, OUTPUT);
   pinMode(echoPin2, INPUT);
 
   Serial.begin(9600);
   delay(2000);
   Serial.println("========================================");
-  Serial.println("ROBOT CONTROL - Wall Following Mode");
+  Serial.println("SIMPLE WALL FOLLOWER");
   Serial.println("========================================");
-  Serial.println();
 
-  // Connect to Hotspot
-  Serial.print("Connecting to hotspot: ");
+  Serial.print("Connecting to: ");
   Serial.println(ssid);
-  
   WiFi.begin(ssid, password);
   
   int attempts = 0;
@@ -92,157 +71,105 @@ void setup() {
   }
   
   Serial.println();
-  
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("Connected to Hotspot!");
-    Serial.println();
-    Serial.println("========================================");
-    Serial.print("IP Address: ");
+    Serial.println("Connected!");
+    Serial.print("IP: ");
     Serial.println(WiFi.localIP());
-    Serial.println("========================================");
-    Serial.println();
-    
     server.begin();
-  } else {
-    Serial.println("Failed to connect to hotspot");
   }
 }
 
 void loop() {
-  // ========== READ ULTRASONIC SENSORS CONTINUOUSLY ==========
-  // Read Sensor 1 (FRONT)
+  // Read front sensor
   digitalWrite(trigPin1, LOW);
   delayMicroseconds(2);
   digitalWrite(trigPin1, HIGH);
   delayMicroseconds(10);
   digitalWrite(trigPin1, LOW);
-  
-  duration1 = pulseIn(echoPin1, HIGH, 30000);  // 30ms timeout
-  cm1 = (duration1 == 0) ? 999 : (duration1 / 2) / 29.1;  // 999 = no obstacle
+  long duration1 = pulseIn(echoPin1, HIGH, 30000);
+  cm1 = (duration1 == 0) ? 999 : (duration1 / 2) / 29.1;
 
   delayMicroseconds(10);
 
-  // Read Sensor 2 (RIGHT SIDE)
+  // Read right side sensor
   digitalWrite(trigPin2, LOW);
   delayMicroseconds(2);
   digitalWrite(trigPin2, HIGH);
   delayMicroseconds(10);
   digitalWrite(trigPin2, LOW);
-  
-  duration2 = pulseIn(echoPin2, HIGH, 30000);  // 30ms timeout
-  cm2 = (duration2 == 0) ? 999 : (duration2 / 2) / 29.1;  // 999 = no obstacle
+  long duration2 = pulseIn(echoPin2, HIGH, 30000);
+  cm2 = (duration2 == 0) ? 999 : (duration2 / 2) / 29.1;
 
-  // ========== AUTONOMOUS DRIVING LOGIC ==========
+  // ========== AUTONOMOUS LOGIC ==========
   if (autonomousMode) {
-    // If we're in a timed forward move after a turn
-    if (isMovingForward) {
-      if (millis() - forwardStartTime < forwardDuration) {
-        // Continue forward but STILL CHECK for obstacles
-        if (cm1 > 0 && cm1 <= 30) {
-          // New wall detected during post-turn forward - abort and handle it
-          Serial.println("AUTO: New wall detected during post-turn forward!");
-          isMovingForward = false;
-        } else {
-          // Keep moving forward with wall following
-          followWall();
-        }
-      } else {
-        // Forward duration complete
-        isMovingForward = false;
-      }
+    // Priority 1: Front obstacle - turn left
+    if (cm1 < frontObstacle && cm1 > 0) {
+      Serial.println("FRONT OBSTACLE! Turning left...");
+      stop();
+      delay(300);
+      turnLeft();
+      delay(500);
+      stop();
+      delay(200);
     }
-    
-    // Normal wall-following logic (only when not in timed forward move)
-    if (!isMovingForward) {
-      // ========== FRONT WALL DETECTION (Priority) ==========
-      if (cm1 > 0 && cm1 <= 30) {
-        // Wall very close at 30cm, stop and turn
-        Serial.print("AUTO: Front wall detected at ");
-        Serial.print(cm1);
-        Serial.println(" cm - stopping");
-        
-        // STOP
-        driveAutonomous(LOW, LOW, LOW, LOW, 0);
-        delay(300);
-        
-        // Check right sensor to decide turn direction
-        if (cm2 < 30) {
-          // Wall on right, turn LEFT 90 degrees
-          Serial.println("AUTO: Wall on right, turning LEFT 90 degrees");
-          driveAutonomous(HIGH, LOW, LOW, HIGH, baseSpeed);
-          delay(turnDuration90);
-        }
-        else {
-          // No wall on right, turn RIGHT 90 degrees
-          Serial.println("AUTO: No wall on right, turning RIGHT 90 degrees");
-          driveAutonomous(LOW, HIGH, HIGH, LOW, baseSpeed);
-          delay(turnDuration90);
-        }
-        
-        // Stop after turn
-        driveAutonomous(LOW, LOW, LOW, LOW, 0);
-        delay(200);
-        
-        // Start timed forward movement (non-blocking)
-        Serial.println("AUTO: Moving forward after turn");
-        isMovingForward = true;
-        forwardStartTime = millis();
-      }
-      // ========== NO FRONT WALL - USE WALL FOLLOWING ==========
-      else {
-        followWall();
-      }
+    // Priority 2: No wall on right - turn right
+    else if (cm2 >= wallDetected || cm2 == 999) {
+      Serial.print("NO WALL on right (");
+      Serial.print(cm2);
+      Serial.println("cm) - Turning right...");
+      stop();
+      delay(200);
+      turnRight();
+      delay(500);
+      stop();
+      delay(200);
+    }
+    // Priority 3: Wall detected - just go forward
+    else {
+      Serial.print("Wall detected (");
+      Serial.print(cm2);
+      Serial.println("cm) - Going forward");
+      goForward();
     }
   }
 
-  // ========== HANDLE WIFI CLIENTS ==========
+  // ========== WIFI CONTROL ==========
   WiFiClient client = server.available();
-  
   if (client) {
     String currentLine = "";
-    
     while (client.connected()) {
       if (client.available()) {
         char c = client.read();
-        
         if (c == '\n') {
           if (currentLine.length() == 0) {
-            // Send HTTP response
             sendWebPage(client);
             break;
           } else {
-            // Process GET request
             if (currentLine.indexOf("GET /AUTO_ON") >= 0) {
               autonomousMode = true;
-              Serial.println("AUTONOMOUS MODE: ON");
+              Serial.println("AUTO MODE ON");
             }
             else if (currentLine.indexOf("GET /AUTO_OFF") >= 0) {
               autonomousMode = false;
-              drive(LOW, LOW, LOW, LOW);  // Stop
-              Serial.println("AUTONOMOUS MODE: OFF");
+              stop();
+              Serial.println("AUTO MODE OFF");
             }
             else if (currentLine.indexOf("GET /F") >= 0 && !autonomousMode) {
-              Serial.println("MANUAL: FORWARD");
-              drive(LOW, HIGH, LOW, HIGH);
+              goForward();
             }
             else if (currentLine.indexOf("GET /B") >= 0 && !autonomousMode) {
-              Serial.println("MANUAL: BACKWARD");
-              drive(HIGH, LOW, HIGH, LOW);
+              goBackward();
             }
             else if (currentLine.indexOf("GET /L") >= 0 && !autonomousMode) {
-              Serial.println("MANUAL: LEFT");
-              drive(HIGH, LOW, LOW, HIGH);
+              turnLeft();
             }
             else if (currentLine.indexOf("GET /R") >= 0 && !autonomousMode) {
-              Serial.println("MANUAL: RIGHT");
-              drive(LOW, HIGH, HIGH, LOW);
+              turnRight();
             }
             else if (currentLine.indexOf("GET /S") >= 0 && !autonomousMode) {
-              Serial.println("MANUAL: STOP");
-              drive(LOW, LOW, LOW, LOW);
+              stop();
             }
             else if (currentLine.indexOf("GET /data") >= 0) {
-              // Send JSON telemetry data
               sendTelemetryJSON(client);
               client.stop();
               return;
@@ -257,193 +184,112 @@ void loop() {
     client.stop();
   }
 
-  delay(5);  // Faster sensor updates for better response time
+  delay(100);
 }
 
-// ========== WALL FOLLOWING FUNCTION (FIXED) ==========
-void followWall() {
-  // Get current right sensor reading
-  int rightDistance = cm2;
+// ========== SIMPLE MOVEMENT FUNCTIONS ==========
+void goForward() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, HIGH);
+  analogWrite(enA, baseSpeed * leftTrim);
   
-  // ========== CASE 1: NO WALL ON RIGHT - TURN RIGHT ==========
-  if (rightDistance >= noWallDistance || rightDistance == 999) {
-    Serial.print("AUTO: No wall detected on right (");
-    Serial.print(rightDistance);
-    Serial.println(" cm) - TURNING RIGHT to find wall");
-    
-    // Turn right to find the wall
-    digitalWrite(in1, LOW);
-    digitalWrite(in2, HIGH);
-    analogWrite(enA, baseSpeed * leftTrim);  // Left motor forward
-    
-    digitalWrite(in3, HIGH);
-    digitalWrite(in4, LOW);
-    analogWrite(enB, (baseSpeed * 0.5) * rightTrim);  // Right motor backward (slower)
-  }
-  
-  // ========== CASE 2: WALL TOO CLOSE - STEER LEFT ==========
-  else if (rightDistance < wallTooClose) {
-    Serial.print("AUTO: Too close to wall (");
-    Serial.print(rightDistance);
-    Serial.println(" cm) - steering LEFT");
-    
-    // Steer left (slow down right motor)
-    digitalWrite(in1, LOW);
-    digitalWrite(in2, HIGH);
-    analogWrite(enA, baseSpeed * leftTrim);  // Left motor full speed
-    
-    digitalWrite(in3, LOW);
-    digitalWrite(in4, HIGH);
-    analogWrite(enB, (baseSpeed * 0.5) * rightTrim);  // Right motor 50% speed
-  }
-  
-  // ========== CASE 3: WALL TOO FAR - STEER RIGHT ==========
-  else if (rightDistance > wallTooFar) {
-    Serial.print("AUTO: Too far from wall (");
-    Serial.print(rightDistance);
-    Serial.println(" cm) - steering RIGHT");
-    
-    // Steer right (slow down left motor)
-    digitalWrite(in1, LOW);
-    digitalWrite(in2, HIGH);
-    analogWrite(enA, (baseSpeed * 0.5) * leftTrim);  // Left motor 50% speed
-    
-    digitalWrite(in3, LOW);
-    digitalWrite(in4, HIGH);
-    analogWrite(enB, baseSpeed * rightTrim);  // Right motor full speed
-  }
-  
-  // ========== CASE 4: PERFECT DISTANCE - GO STRAIGHT ==========
-  else {
-    currentSpeed = baseSpeed;
-    driveAutonomous(LOW, HIGH, LOW, HIGH, currentSpeed);
-    Serial.print("AUTO: Perfect distance (");
-    Serial.print(rightDistance);
-    Serial.println(" cm) - straight");
-  }
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, baseSpeed * rightTrim);
 }
 
-// ========== DRIVE FUNCTION (Manual Control) ==========
-void drive(int a1, int a2, int b1, int b2) {
-  digitalWrite(in1, a1);
-  digitalWrite(in2, a2);
-  analogWrite(enA, (a1 == a2) ? 0 : speed * leftTrim);
-
-  digitalWrite(in3, b2);
-  digitalWrite(in4, b1);
-  analogWrite(enB, (b1 == b2) ? 0 : speed * rightTrim);
+void goBackward() {
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enA, baseSpeed * leftTrim);
+  
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  analogWrite(enB, baseSpeed * rightTrim);
 }
 
-// ========== DRIVE FUNCTION (Autonomous Control with Speed) ==========
-void driveAutonomous(int a1, int a2, int b1, int b2, int autoSpeed) {
-  digitalWrite(in1, a1);
-  digitalWrite(in2, a2);
-  analogWrite(enA, (a1 == a2) ? 0 : autoSpeed * leftTrim);
-
-  digitalWrite(in3, b2);
-  digitalWrite(in4, b1);
-  analogWrite(enB, (b1 == b2) ? 0 : autoSpeed * rightTrim);
+void turnLeft() {
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enA, baseSpeed * leftTrim);
+  
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, baseSpeed * rightTrim);
 }
 
-// ========== SEND WEB PAGE ==========
+void turnRight() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, HIGH);
+  analogWrite(enA, baseSpeed * leftTrim);
+  
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  analogWrite(enB, baseSpeed * rightTrim);
+}
+
+void stop() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  analogWrite(enA, 0);
+  
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+  analogWrite(enB, 0);
+}
+
+// ========== WEB PAGE ==========
 void sendWebPage(WiFiClient &client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:text/html");
   client.println();
   
-  // HTML page with controls
-  client.println("<!DOCTYPE html>");
-  client.println("<html>");
-  client.println("<head>");
+  client.println("<!DOCTYPE html><html><head>");
   client.println("<meta name='viewport' content='width=device-width, initial-scale=1'>");
   client.println("<title>Robot Control</title>");
   client.println("<style>");
-  client.println("body { font-family: Arial; text-align: center; background: #1e1e1e; color: #fff; margin: 0; padding: 20px; }");
-  client.println("h1 { color: #4CAF50; font-size: 32px; }");
-  client.println(".mode-section { margin: 20px auto; max-width: 400px; }");
-  client.println(".mode-btn { background: #2196F3; border: none; color: white; padding: 20px 40px; font-size: 20px; font-weight: bold; margin: 10px; cursor: pointer; border-radius: 10px; width: 200px; }");
-  client.println(".mode-btn.active { background: #ff9800; }");
-  client.println(".mode-btn:active { transform: scale(0.95); }");
-  client.println(".controls { margin: 30px auto; max-width: 400px; }");
-  client.println(".btn { background: #4CAF50; border: none; color: white; padding: 15px 25px; font-size: 18px; font-weight: bold; margin: 8px; cursor: pointer; border-radius: 10px; min-width: 120px; }");
-  client.println(".btn:active { background: #45a049; transform: scale(0.95); }");
-  client.println(".btn:disabled { background: #555; cursor: not-allowed; }");
-  client.println(".stop { background: #f44336; font-size: 20px; }");
-  client.println(".stop:active { background: #da190b; }");
-  client.println(".row { display: flex; justify-content: center; margin: 10px 0; }");
-  client.println(".telemetry { background: #2d2d2d; padding: 20px; margin: 30px auto; max-width: 400px; border-radius: 10px; }");
-  client.println(".sensor { margin: 15px 0; font-size: 20px; font-weight: bold; }");
-  client.println(".sensor-label { color: #4CAF50; }");
-  client.println(".sensor-value { color: #fff; font-size: 24px; }");
-  client.println(".status { font-size: 18px; margin: 20px 0; padding: 15px; background: #333; border-radius: 8px; }");
-  client.println("</style>");
-  client.println("</head>");
-  client.println("<body>");
-  client.println("<h1>🤖 Robot Control</h1>");
+  client.println("body{font-family:Arial;text-align:center;background:#1e1e1e;color:#fff;padding:20px}");
+  client.println("h1{color:#4CAF50}");
+  client.println(".mode-btn{background:#2196F3;border:none;color:white;padding:20px 40px;font-size:20px;margin:10px;border-radius:10px;width:200px}");
+  client.println(".mode-btn.active{background:#ff9800}");
+  client.println(".btn{background:#4CAF50;border:none;color:white;padding:15px 25px;font-size:18px;margin:8px;border-radius:10px;min-width:120px}");
+  client.println(".stop{background:#f44336}");
+  client.println(".row{display:flex;justify-content:center;margin:10px 0}");
+  client.println(".telemetry{background:#2d2d2d;padding:20px;margin:30px auto;max-width:400px;border-radius:10px}");
+  client.println(".sensor{margin:15px 0;font-size:20px}");
+  client.println("</style></head><body>");
   
-  // Mode Selection
-  client.println("<div class='mode-section'>");
-  client.println("<h2 style='color: #2196F3;'>Control Mode</h2>");
-  client.println("<button class='mode-btn' id='autoBtn' onclick='setAuto(true)'>AUTONOMOUS</button>");
-  client.println("<button class='mode-btn active' id='manualBtn' onclick='setAuto(false)'>MANUAL</button>");
-  client.println("<div class='status' id='status'>Mode: Manual Control</div>");
-  client.println("</div>");
+  client.println("<h1>🤖 Wall Follower</h1>");
+  client.println("<div><button class='mode-btn' id='autoBtn' onclick='setAuto(true)'>AUTONOMOUS</button>");
+  client.println("<button class='mode-btn active' id='manualBtn' onclick='setAuto(false)'>MANUAL</button></div>");
   
-  // Manual Controls
-  client.println("<div class='controls' id='manualControls'>");
-  client.println("<div class='row'><button class='btn' onclick='send(\"F\")'>FORWARD ⬆️</button></div>");
-  client.println("<div class='row'>");
-  client.println("<button class='btn' onclick='send(\"L\")'>LEFT ⬅️</button>");
-  client.println("<button class='btn stop' onclick='send(\"S\")'>STOP 🛑</button>");
-  client.println("<button class='btn' onclick='send(\"R\")'>RIGHT ➡️</button>");
-  client.println("</div>");
-  client.println("<div class='row'><button class='btn' onclick='send(\"B\")'>BACK ⬇️</button></div>");
-  client.println("</div>");
+  client.println("<div id='controls'>");
+  client.println("<div class='row'><button class='btn' onclick='send(\"F\")'>FORWARD</button></div>");
+  client.println("<div class='row'><button class='btn' onclick='send(\"L\")'>LEFT</button>");
+  client.println("<button class='btn stop' onclick='send(\"S\")'>STOP</button>");
+  client.println("<button class='btn' onclick='send(\"R\")'>RIGHT</button></div>");
+  client.println("<div class='row'><button class='btn' onclick='send(\"B\")'>BACK</button></div></div>");
   
-  // Sensor Telemetry
-  client.println("<div class='telemetry'>");
-  client.println("<h2 style='color: #4CAF50; margin-top: 0;'>📡 Sensor Readings</h2>");
-  client.println("<div class='sensor'><span class='sensor-label'>Front Sensor:</span> <span class='sensor-value' id='s1'>--</span> cm</div>");
-  client.println("<div class='sensor'><span class='sensor-label'>Right Sensor:</span> <span class='sensor-value' id='s2'>--</span> cm</div>");
-  client.println("<div style='margin-top: 20px; padding: 10px; background: #3d3d3d; border-radius: 5px;'>");
-  client.println("<div style='color: #2196F3; font-size: 16px; margin-bottom: 10px;'>Wall Following Settings</div>");
-  client.println("<div style='font-size: 14px; color: #aaa;'>Target: 25-35cm | No Wall: >60cm</div>");
-  client.println("</div>");
-  client.println("</div>");
+  client.println("<div class='telemetry'><h2>Sensors</h2>");
+  client.println("<div class='sensor'>Front: <span id='s1'>--</span> cm</div>");
+  client.println("<div class='sensor'>Right: <span id='s2'>--</span> cm</div></div>");
   
   client.println("<script>");
-  client.println("let autoMode = false;");
-  client.println("function send(cmd) { fetch('/' + cmd); }");
-  client.println("function setAuto(mode) {");
-  client.println("  autoMode = mode;");
-  client.println("  if (mode) {");
-  client.println("    fetch('/AUTO_ON');");
-  client.println("    document.getElementById('status').textContent = 'Mode: Right-Wall Following Active 🤖';");
-  client.println("    document.getElementById('status').style.background = '#ff9800';");
-  client.println("    document.getElementById('autoBtn').classList.add('active');");
-  client.println("    document.getElementById('manualBtn').classList.remove('active');");
-  client.println("    document.getElementById('manualControls').style.opacity = '0.3';");
-  client.println("  } else {");
-  client.println("    fetch('/AUTO_OFF');");
-  client.println("    document.getElementById('status').textContent = 'Mode: Manual Control 🎮';");
-  client.println("    document.getElementById('status').style.background = '#333';");
-  client.println("    document.getElementById('autoBtn').classList.remove('active');");
-  client.println("    document.getElementById('manualBtn').classList.add('active');");
-  client.println("    document.getElementById('manualControls').style.opacity = '1';");
-  client.println("  }");
+  client.println("function send(c){fetch('/'+c)}");
+  client.println("function setAuto(m){");
+  client.println("  fetch(m?'/AUTO_ON':'/AUTO_OFF');");
+  client.println("  document.getElementById('autoBtn').classList.toggle('active',m);");
+  client.println("  document.getElementById('manualBtn').classList.toggle('active',!m);");
   client.println("}");
-  client.println("setInterval(() => {");
-  client.println("  fetch('/data').then(r => r.json()).then(d => {");
-  client.println("    document.getElementById('s1').textContent = d.s1 === 999 ? 'No obstacle' : d.s1;");
-  client.println("    document.getElementById('s2').textContent = d.s2 === 999 ? 'No obstacle' : d.s2;");
-  client.println("  }).catch(e => console.log('Error fetching data'));");
-  client.println("}, 500);");
-  client.println("</script>");
-  
-  client.println("</body></html>");
+  client.println("setInterval(()=>{");
+  client.println("  fetch('/data').then(r=>r.json()).then(d=>{");
+  client.println("    document.getElementById('s1').textContent=d.s1==999?'No obstacle':d.s1;");
+  client.println("    document.getElementById('s2').textContent=d.s2==999?'No wall':d.s2;");
+  client.println("  })");
+  client.println("},500);");
+  client.println("</script></body></html>");
 }
 
-// ========== SEND TELEMETRY JSON ==========
 void sendTelemetryJSON(WiFiClient &client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:application/json");
@@ -452,7 +298,5 @@ void sendTelemetryJSON(WiFiClient &client) {
   client.print(cm1);
   client.print(",\"s2\":");
   client.print(cm2);
-  client.print(",\"mode\":\"");
-  client.print(autonomousMode ? "auto" : "manual");
-  client.println("\"}");
+  client.println("}");
 }
