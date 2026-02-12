@@ -1,0 +1,417 @@
+#include <WiFiS3.h>
+
+// ========== HOTSPOT CREDENTIALS ==========
+const char* ssid = "Brady";
+const char* password = "Brady2005";
+
+WiFiServer server(80);
+
+// ========== MOTOR PINS (L298N) ==========
+int enA = 9;
+int in1 = 8;
+int in2 = 7;
+
+int enB = 10;
+int in3 = 12;
+int in4 = 13;
+
+// ========== ANALOG IR SENSORS ==========
+#define LEFT_IR A0
+#define RIGHT_IR A2
+#define MIDDLE_IR A1
+
+// ========== LINE FOLLOWING SETTINGS ==========
+#define DETECT_LIMIT 300          // Adjust this value based on your sensors (higher = detects black)
+#define FORWARD_SPEED      60   // Slightly higher for smoother momentum
+#define TURN_SHARP_SPEED   65   // High enough to overcome stiction but not overshoot
+#define TURN_SLIGHT_SPEED  80   // Very slow inner wheel for gentle curve
+#define DELAY_AFTER_TURN 100
+#define BEFORE_TURN_DELAY 10
+
+// ========== MOTOR TRIM ==========
+int leftTrim = 0;     // increase if left wheel is slower
+int rightTrim = 0;    // increase if right wheel is slower
+
+
+// Variables to store analog sensor values
+int left_value;
+int right_value;
+int middle_value;
+char lastDirection = 'S';
+
+// ========== AUTONOMOUS MODE ==========
+bool autonomousMode = false;
+
+void setup() {
+  // Motor setup
+  pinMode(enA, OUTPUT); 
+  pinMode(in1, OUTPUT); 
+  pinMode(in2, OUTPUT);
+  pinMode(enB, OUTPUT); 
+  pinMode(in3, OUTPUT); 
+  pinMode(in4, OUTPUT);
+
+  stopMotors();
+
+  Serial.begin(9600);
+  delay(2000);
+
+  Serial.println("========================================");
+  Serial.println("LINE FOLLOWER ROBOT - ANALOG SENSORS");
+  Serial.println("========================================");
+
+  // WiFi connect
+  Serial.println("Connecting to hotspot...");
+  WiFi.begin(ssid, password);
+  
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nConnected!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+    server.begin();
+  } else {
+    Serial.println("\nFailed to connect.");
+  }
+
+  // Give starting push to robot
+  /*
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enA, 255);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, 255);
+  delay(40);
+  */
+}
+
+void loop() {
+  // ========== AUTONOMOUS LINE FOLLOWING ==========
+  if (autonomousMode) {
+    followLine();
+  }
+
+  // ========== HANDLE WIFI CLIENT ==========
+  WiFiClient client = server.available();
+  if (client) {
+    String currentLine = "";
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        if (c == '\n') {
+          if (currentLine.length() == 0) {
+            sendWebPage(client);
+            break;
+          } else {
+
+            if (currentLine.indexOf("GET /AUTO_ON") >= 0) {
+              autonomousMode = true;
+              Serial.println("AUTO MODE: ON");
+            }
+            else if (currentLine.indexOf("GET /AUTO_OFF") >= 0) {
+              autonomousMode = false;
+              stopMotors();
+              Serial.println("AUTO MODE: OFF");
+            }
+            else if (currentLine.indexOf("GET /F") >= 0 && !autonomousMode) {
+              manualForward();
+            }
+            else if (currentLine.indexOf("GET /B") >= 0 && !autonomousMode) {
+              manualBackward();
+            }
+            else if (currentLine.indexOf("GET /L") >= 0 && !autonomousMode) {
+              manualTurnLeft();
+            }
+            else if (currentLine.indexOf("GET /R") >= 0 && !autonomousMode) {
+              manualTurnRight();
+            }
+            else if (currentLine.indexOf("GET /S") >= 0 && !autonomousMode) {
+              stopMotors();
+            }
+
+            currentLine = "";
+          }
+        } 
+        else if (c != '\r') {
+          currentLine += c;
+        }
+      }
+    }
+    client.stop();
+  }
+
+  delay(10);
+}
+
+int applyTrim(int baseSpeed, int trim) {
+  int newSpeed = baseSpeed + trim;
+
+  if (newSpeed > 255) newSpeed = 255;
+  if (newSpeed < 0) newSpeed = 0;
+
+  return newSpeed;
+}
+
+// ========== LINE FOLLOWING WITH ANALOG SENSORS ==========
+void followLine() {
+  left_value = analogRead(LEFT_IR);
+  right_value = analogRead(RIGHT_IR);
+  middle_value = analogRead(MIDDLE_IR);
+
+  // Print sensor values for debugging/calibration
+  Serial.print("L: ");
+  Serial.print(left_value);
+  Serial.print(" | M: ");
+  Serial.print(middle_value);
+  Serial.print(" | R: ");
+  Serial.print(right_value);
+  Serial.print(" | Dir: ");
+  Serial.println(lastDirection);
+
+
+  // Middle sensor is on the tape & left and right are not on tape
+  if ((middle_value < DETECT_LIMIT) && (right_value >= DETECT_LIMIT) && (left_value >= DETECT_LIMIT)) {
+    moveForward();
+  }
+  // Middle is not on tape and Right sensor is not on tape, left is
+  else if ((middle_value >= DETECT_LIMIT) && (right_value >= DETECT_LIMIT) && !(left_value >= DETECT_LIMIT)) {
+    steerLeft();
+  }
+  // Middle is not on tape and Left sensor is not on tape, right is
+  else if ((middle_value >= DETECT_LIMIT) && (left_value >= DETECT_LIMIT) && !(right_value >= DETECT_LIMIT)) {
+    steerRight();
+  }
+  // Middle is on tape and Left sensor is on tape, right is not
+  else if ((middle_value < DETECT_LIMIT) && (left_value < DETECT_LIMIT) && (right_value >= DETECT_LIMIT)) {
+    turnLeft();
+  }
+  // Middle is on tape and Right sensor is on tape, left is not
+  else if ((middle_value < DETECT_LIMIT) && (right_value < DETECT_LIMIT) && (left_value >= DETECT_LIMIT)) {
+    turnRight();
+  }
+  // All sensors not on tape - stop
+  else if ((middle_value >= DETECT_LIMIT) && (left_value >= DETECT_LIMIT) && (right_value >= DETECT_LIMIT)) {
+    stop();
+  }
+  delay(15);
+}
+
+// ========== AUTO MODE MOVEMENT FUNCTIONS ==========
+void moveForward() {
+  lastDirection = 'F';
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enA, applyTrim(FORWARD_SPEED, leftTrim));
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, applyTrim(FORWARD_SPEED, rightTrim));
+}
+
+
+void stop() {
+  if (lastDirection != 'S') {
+    // Move forward once more to verify it's actually a stop
+    digitalWrite(in1, HIGH);
+    digitalWrite(in2, LOW);
+    analogWrite(enA, 60);
+    digitalWrite(in3, LOW);
+    digitalWrite(in4, HIGH);
+    analogWrite(enB, 60);
+    lastDirection = 'S';
+    delay(40);
+  } else {
+    // Actually stop the robot
+    stopMotors();
+    lastDirection = 'S';
+  }
+}
+
+void turnRight() {
+  lastDirection = 'R';
+  stopMotors();
+  delay(40);
+
+  unsigned long startTime = millis();
+
+  while (true) {
+    int turnSpeed = (millis() - startTime < 400) ? TURN_SHARP_SPEED : 45;
+
+    digitalWrite(in1, HIGH);
+    digitalWrite(in2, LOW);
+    analogWrite(enA, applyTrim(turnSpeed, leftTrim));
+    digitalWrite(in3, HIGH);
+    digitalWrite(in4, LOW);
+    analogWrite(enB, applyTrim(turnSpeed, rightTrim));
+
+    middle_value = analogRead(MIDDLE_IR);
+    left_value   = analogRead(LEFT_IR);
+    right_value  = analogRead(RIGHT_IR);
+
+    // Only exit when MIDDLE is on tape AND side sensors are OFF tape
+    // This means robot is centred on the line again
+    if (middle_value < DETECT_LIMIT && 
+        left_value >= DETECT_LIMIT && 
+        right_value >= DETECT_LIMIT) {
+      // Drive forward briefly to fully centre before returning to followLine()
+      digitalWrite(in1, HIGH); digitalWrite(in2, LOW);  analogWrite(enA, FORWARD_SPEED);
+      digitalWrite(in3, LOW);  digitalWrite(in4, HIGH); analogWrite(enB, FORWARD_SPEED);
+      delay(60);
+      stopMotors();
+      break;
+    }
+
+    if (millis() - startTime > 2000) {
+      stopMotors();
+      break;
+    }
+  }
+}
+
+void turnLeft() {
+  lastDirection = 'L';
+  stopMotors();
+  delay(40);
+
+  unsigned long startTime = millis();
+
+  while (true) {
+    int turnSpeed = (millis() - startTime < 400) ? TURN_SHARP_SPEED : 45;
+
+    // Don't check exit condition for first 600ms — forces minimum turn amount
+    bool allowExit = (millis() - startTime > 600);
+
+    digitalWrite(in1, LOW);
+    digitalWrite(in2, HIGH);
+    analogWrite(enA, applyTrim(turnSpeed, leftTrim));
+    digitalWrite(in3, LOW);
+    digitalWrite(in4, HIGH);
+    analogWrite(enB, applyTrim(turnSpeed, rightTrim));
+
+    middle_value = analogRead(MIDDLE_IR);
+    left_value   = analogRead(LEFT_IR);
+    right_value  = analogRead(RIGHT_IR);
+
+    // Only exit when MIDDLE is on tape AND side sensors are OFF tape
+    // This means robot is centred on the line again
+    if (allowExit &&
+        middle_value < DETECT_LIMIT && 
+        left_value >= DETECT_LIMIT && 
+        right_value >= DETECT_LIMIT) {
+      // Drive forward briefly to fully centre before returning to followLine()
+      digitalWrite(in1, HIGH); digitalWrite(in2, LOW);  analogWrite(enA, FORWARD_SPEED);
+      digitalWrite(in3, LOW);  digitalWrite(in4, HIGH); analogWrite(enB, FORWARD_SPEED);
+      delay(60);
+      stopMotors();
+      break;
+    }
+
+    if (millis() - startTime > 2000) {
+      stopMotors();
+      break;
+    }
+  }
+}
+void steerRight() {
+  lastDirection = 'r';
+
+  // Left motor full forward speed
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enA, applyTrim(FORWARD_SPEED, leftTrim));
+
+  // Right motor very slow (crawl, not stopped) — smooth curve
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, applyTrim(TURN_SLIGHT_SPEED, rightTrim));
+}
+
+void steerLeft() {
+  lastDirection = 'l';
+
+  // Left motor very slow (crawl, not stopped) — smooth curve
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enA, applyTrim(TURN_SLIGHT_SPEED, leftTrim));
+
+  // Right motor full forward speed
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, applyTrim(FORWARD_SPEED, rightTrim));
+}
+// ========== MANUAL CONTROL FUNCTIONS ==========
+void manualBackward() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, HIGH);
+  analogWrite(enA, 150);
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  analogWrite(enB, 150);
+}
+
+void manualForward() {
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enA, FORWARD_SPEED);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, FORWARD_SPEED);
+}
+
+void manualTurnRight() {
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enA, 100);
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  analogWrite(enB, 150);
+}
+
+void manualTurnLeft() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, HIGH);
+  analogWrite(enA, 150);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, 100);
+}
+
+void stopMotors() {
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, LOW);
+  analogWrite(enA, 0);
+  analogWrite(enB, 0);
+}
+
+// ========== WEB PAGE ==========
+void sendWebPage(WiFiClient &client) {
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-type:text/html");
+  client.println();
+  client.println("<!DOCTYPE html><html><head>");
+  client.println("<meta name='viewport' content='width=device-width, initial-scale=1'>");
+  client.println("<title>Line Follower</title>");
+  client.println("</head><body style='text-align:center;font-family:Arial;'>");
+
+  client.println("<h1>🤖 Line Follower Robot</h1>");
+  client.println("<p>Analog IR Sensors</p>");
+
+  client.println("<button onclick=\"fetch('/AUTO_ON')\">AUTO ON</button><br><br>");
+  client.println("<button onclick=\"fetch('/AUTO_OFF')\">AUTO OFF</button><br><br>");
+
+  client.println("<button onclick=\"fetch('/F')\">FORWARD</button><br><br>");
+  client.println("<button onclick=\"fetch('/L')\">LEFT</button>");
+  client.println("<button onclick=\"fetch('/S')\">STOP</button>");
+  client.println("<button onclick=\"fetch('/R')\">RIGHT</button><br><br>");
+  client.println("<button onclick=\"fetch('/B')\">BACK</button>");
+
+  client.println("</body></html>");
+}
