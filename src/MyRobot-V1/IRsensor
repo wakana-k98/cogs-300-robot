@@ -1,8 +1,8 @@
 #include <WiFiS3.h>
 
 // ========== HOTSPOT CREDENTIALS ==========
-const char* ssid = "Brady";
-const char* password = "Brady2005";
+const char* ssid = "Eric";
+const char* password = "eric1234";
 
 WiFiServer server(80);
 
@@ -21,26 +21,31 @@ int in4 = 13;
 #define MIDDLE_IR A1
 
 // ========== LINE FOLLOWING SETTINGS ==========
-#define DETECT_LIMIT 300          // Adjust this value based on your sensors (higher = detects black)
-#define FORWARD_SPEED      60   // Slightly higher for smoother momentum
-#define TURN_SHARP_SPEED   65   // High enough to overcome stiction but not overshoot
-#define TURN_SLIGHT_SPEED  80   // Very slow inner wheel for gentle curve
-#define DELAY_AFTER_TURN 100
-#define BEFORE_TURN_DELAY 10
+#define DETECT_LIMIT 300
+#define DETECT_SPAN 260
 
-// ========== MOTOR TRIM ==========
-int leftTrim = 0;     // increase if left wheel is slower
-int rightTrim = 0;    // increase if right wheel is slower
+// ========== MOTOR SPEED LIMITS - TUNED FOR YOUR MOTORS ==========
+#define LEFT_MIN_SPEED     200    // Left motor needs high power to work
+#define LEFT_MAX_SPEED     255    // Left motor at full power
+#define RIGHT_MIN_SPEED    60     // Right motor works at low speeds
+#define RIGHT_MAX_SPEED    140    // Right motor capped lower to match left
+#define BASE_LEFT          230    // Left motor base speed (high)
+#define BASE_RIGHT         100    // Right motor base speed (low to match)
+#define CORRECTION_STRENGTH 30    // Gentle corrections
 
-
-// Variables to store analog sensor values
+// Variables
 int left_value;
 int right_value;
 int middle_value;
 char lastDirection = 'S';
-
-// ========== AUTONOMOUS MODE ==========
 bool autonomousMode = false;
+
+float tapeStrength(int sensorValue) {
+  float s = (float)(DETECT_LIMIT - sensorValue) / (float)DETECT_SPAN;
+  if (s < 0.0) s = 0.0;
+  if (s > 1.0) s = 1.0;
+  return s;
+}
 
 void setup() {
   // Motor setup
@@ -57,7 +62,7 @@ void setup() {
   delay(2000);
 
   Serial.println("========================================");
-  Serial.println("LINE FOLLOWER ROBOT - ANALOG SENSORS");
+  Serial.println("LINE FOLLOWER ROBOT - OPTIMIZED");
   Serial.println("========================================");
 
   // WiFi connect
@@ -79,17 +84,6 @@ void setup() {
   } else {
     Serial.println("\nFailed to connect.");
   }
-
-  // Give starting push to robot
-  /*
-  digitalWrite(in1, HIGH);
-  digitalWrite(in2, LOW);
-  analogWrite(enA, 255);
-  digitalWrite(in3, LOW);
-  digitalWrite(in4, HIGH);
-  analogWrite(enB, 255);
-  delay(40);
-  */
 }
 
 void loop() {
@@ -150,236 +144,140 @@ void loop() {
   delay(10);
 }
 
-int applyTrim(int baseSpeed, int trim) {
-  int newSpeed = baseSpeed + trim;
+// ========== BALANCED MOTOR CONTROL ==========
+// This function balances the weak left motor with the strong right motor
+void driveBalanced(int leftSpeed, int rightSpeed) {
+  // Constrain left motor (needs high speeds)
+  if (leftSpeed > 0) {
+    if (leftSpeed < LEFT_MIN_SPEED) leftSpeed = LEFT_MIN_SPEED;
+    if (leftSpeed > LEFT_MAX_SPEED) leftSpeed = LEFT_MAX_SPEED;
+  } else if (leftSpeed < 0) {
+    if (leftSpeed > -LEFT_MIN_SPEED) leftSpeed = -LEFT_MIN_SPEED;
+    if (leftSpeed < -LEFT_MAX_SPEED) leftSpeed = -LEFT_MAX_SPEED;
+  }
+  
+  // Constrain right motor (works at low speeds)
+  if (rightSpeed > 0) {
+    if (rightSpeed < RIGHT_MIN_SPEED) rightSpeed = RIGHT_MIN_SPEED;
+    if (rightSpeed > RIGHT_MAX_SPEED) rightSpeed = RIGHT_MAX_SPEED;
+  } else if (rightSpeed < 0) {
+    if (rightSpeed > -RIGHT_MIN_SPEED) rightSpeed = -RIGHT_MIN_SPEED;
+    if (rightSpeed < -RIGHT_MAX_SPEED) rightSpeed = -RIGHT_MAX_SPEED;
+  }
 
-  if (newSpeed > 255) newSpeed = 255;
-  if (newSpeed < 0) newSpeed = 0;
+  // Left motor control
+  if (leftSpeed >= 0) {
+    digitalWrite(in1, HIGH);
+    digitalWrite(in2, LOW);
+    analogWrite(enA, leftSpeed);
+  } else {
+    digitalWrite(in1, LOW);
+    digitalWrite(in2, HIGH);
+    analogWrite(enA, -leftSpeed);
+  }
 
-  return newSpeed;
+  // Right motor control
+  if (rightSpeed >= 0) {
+    digitalWrite(in3, LOW);
+    digitalWrite(in4, HIGH);
+    analogWrite(enB, rightSpeed);
+  } else {
+    digitalWrite(in3, HIGH);
+    digitalWrite(in4, LOW);
+    analogWrite(enB, -rightSpeed);
+  }
 }
 
-// ========== LINE FOLLOWING WITH ANALOG SENSORS ==========
+// ========== SMOOTH PROPORTIONAL LINE FOLLOWING ==========
 void followLine() {
   left_value = analogRead(LEFT_IR);
   right_value = analogRead(RIGHT_IR);
   middle_value = analogRead(MIDDLE_IR);
 
-  // Print sensor values for debugging/calibration
   Serial.print("L: ");
   Serial.print(left_value);
   Serial.print(" | M: ");
   Serial.print(middle_value);
   Serial.print(" | R: ");
   Serial.print(right_value);
-  Serial.print(" | Dir: ");
-  Serial.println(lastDirection);
+  Serial.print(" | ");
 
+  // Convert to tape strength
+  float l = tapeStrength(left_value);
+  float m = tapeStrength(middle_value);
+  float r = tapeStrength(right_value);
 
-  // Middle sensor is on the tape & left and right are not on tape
-  if ((middle_value < DETECT_LIMIT) && (right_value >= DETECT_LIMIT) && (left_value >= DETECT_LIMIT)) {
-    moveForward();
+  // Sensors are mirrored
+  float leftSensor = r;
+  float rightSensor = l;
+  float centerSensor = m;
+
+  // Calculate error: positive = turn right, negative = turn left
+  float error = rightSensor - leftSensor;
+  
+  // Calculate corrections for each motor
+  int leftCorrection = (int)(-error * CORRECTION_STRENGTH);
+  int rightCorrection = (int)(error * CORRECTION_STRENGTH);
+  
+  // CENTER SENSOR ON LINE - smooth proportional control
+  if (centerSensor > 0.15) {
+    int leftSpeed = BASE_LEFT + leftCorrection;
+    int rightSpeed = BASE_RIGHT + rightCorrection;
+    
+    driveBalanced(leftSpeed, rightSpeed);
+    
+    Serial.print("SMOOTH | L:");
+    Serial.print(leftSpeed);
+    Serial.print(" R:");
+    Serial.println(rightSpeed);
+    lastDirection = 'F';
   }
-  // Middle is not on tape and Right sensor is not on tape, left is
-  else if ((middle_value >= DETECT_LIMIT) && (right_value >= DETECT_LIMIT) && !(left_value >= DETECT_LIMIT)) {
-    steerLeft();
-  }
-  // Middle is not on tape and Left sensor is not on tape, right is
-  else if ((middle_value >= DETECT_LIMIT) && (left_value >= DETECT_LIMIT) && !(right_value >= DETECT_LIMIT)) {
-    steerRight();
-  }
-  // Middle is on tape and Left sensor is on tape, right is not
-  else if ((middle_value < DETECT_LIMIT) && (left_value < DETECT_LIMIT) && (right_value >= DETECT_LIMIT)) {
-    turnLeft();
-  }
-  // Middle is on tape and Right sensor is on tape, left is not
-  else if ((middle_value < DETECT_LIMIT) && (right_value < DETECT_LIMIT) && (left_value >= DETECT_LIMIT)) {
-    turnRight();
-  }
-  // All sensors not on tape - stop
-  else if ((middle_value >= DETECT_LIMIT) && (left_value >= DETECT_LIMIT) && (right_value >= DETECT_LIMIT)) {
-    stop();
-  }
-  delay(15);
-}
-
-// ========== AUTO MODE MOVEMENT FUNCTIONS ==========
-void moveForward() {
-  lastDirection = 'F';
-  digitalWrite(in1, HIGH);
-  digitalWrite(in2, LOW);
-  analogWrite(enA, applyTrim(FORWARD_SPEED, leftTrim));
-  digitalWrite(in3, LOW);
-  digitalWrite(in4, HIGH);
-  analogWrite(enB, applyTrim(FORWARD_SPEED, rightTrim));
-}
-
-
-void stop() {
-  if (lastDirection != 'S') {
-    // Move forward once more to verify it's actually a stop
-    digitalWrite(in1, HIGH);
-    digitalWrite(in2, LOW);
-    analogWrite(enA, 60);
-    digitalWrite(in3, LOW);
-    digitalWrite(in4, HIGH);
-    analogWrite(enB, 60);
-    lastDirection = 'S';
-    delay(40);
-  } else {
-    // Actually stop the robot
-    stopMotors();
-    lastDirection = 'S';
-  }
-}
-
-void turnRight() {
-  lastDirection = 'R';
-  stopMotors();
-  delay(40);
-
-  unsigned long startTime = millis();
-
-  while (true) {
-    int turnSpeed = (millis() - startTime < 400) ? TURN_SHARP_SPEED : 45;
-
-    digitalWrite(in1, HIGH);
-    digitalWrite(in2, LOW);
-    analogWrite(enA, applyTrim(turnSpeed, leftTrim));
-    digitalWrite(in3, HIGH);
-    digitalWrite(in4, LOW);
-    analogWrite(enB, applyTrim(turnSpeed, rightTrim));
-
-    middle_value = analogRead(MIDDLE_IR);
-    left_value   = analogRead(LEFT_IR);
-    right_value  = analogRead(RIGHT_IR);
-
-    // Only exit when MIDDLE is on tape AND side sensors are OFF tape
-    // This means robot is centred on the line again
-    if (middle_value < DETECT_LIMIT && 
-        left_value >= DETECT_LIMIT && 
-        right_value >= DETECT_LIMIT) {
-      // Drive forward briefly to fully centre before returning to followLine()
-      digitalWrite(in1, HIGH); digitalWrite(in2, LOW);  analogWrite(enA, FORWARD_SPEED);
-      digitalWrite(in3, LOW);  digitalWrite(in4, HIGH); analogWrite(enB, FORWARD_SPEED);
-      delay(60);
-      stopMotors();
-      break;
-    }
-
-    if (millis() - startTime > 2000) {
-      stopMotors();
-      break;
+  // LOST LINE - search mode
+  else if (centerSensor < 0.1 && leftSensor < 0.1 && rightSensor < 0.1) {
+    if (lastDirection == 'L') {
+      driveBalanced(-200, 120);  // Search left (left motor reverse)
+      Serial.println("SEARCH LEFT");
+    } else {
+      driveBalanced(255, -100);  // Search right (right motor reverse)
+      Serial.println("SEARCH RIGHT");
     }
   }
-}
-
-void turnLeft() {
-  lastDirection = 'L';
-  stopMotors();
-  delay(40);
-
-  unsigned long startTime = millis();
-
-  while (true) {
-    int turnSpeed = (millis() - startTime < 400) ? TURN_SHARP_SPEED : 45;
-
-    // Don't check exit condition for first 600ms — forces minimum turn amount
-    bool allowExit = (millis() - startTime > 600);
-
-    digitalWrite(in1, LOW);
-    digitalWrite(in2, HIGH);
-    analogWrite(enA, applyTrim(turnSpeed, leftTrim));
-    digitalWrite(in3, LOW);
-    digitalWrite(in4, HIGH);
-    analogWrite(enB, applyTrim(turnSpeed, rightTrim));
-
-    middle_value = analogRead(MIDDLE_IR);
-    left_value   = analogRead(LEFT_IR);
-    right_value  = analogRead(RIGHT_IR);
-
-    // Only exit when MIDDLE is on tape AND side sensors are OFF tape
-    // This means robot is centred on the line again
-    if (allowExit &&
-        middle_value < DETECT_LIMIT && 
-        left_value >= DETECT_LIMIT && 
-        right_value >= DETECT_LIMIT) {
-      // Drive forward briefly to fully centre before returning to followLine()
-      digitalWrite(in1, HIGH); digitalWrite(in2, LOW);  analogWrite(enA, FORWARD_SPEED);
-      digitalWrite(in3, LOW);  digitalWrite(in4, HIGH); analogWrite(enB, FORWARD_SPEED);
-      delay(60);
-      stopMotors();
-      break;
-    }
-
-    if (millis() - startTime > 2000) {
-      stopMotors();
-      break;
-    }
+  // SHARP LEFT (only left sensor on)
+  else if (leftSensor > 0.2 && centerSensor < 0.1) {
+    driveBalanced(200, 120);  // Left slower, right faster
+    Serial.println("SHARP LEFT");
+    lastDirection = 'L';
   }
-}
-void steerRight() {
-  lastDirection = 'r';
-
-  // Left motor full forward speed
-  digitalWrite(in1, HIGH);
-  digitalWrite(in2, LOW);
-  analogWrite(enA, applyTrim(FORWARD_SPEED, leftTrim));
-
-  // Right motor very slow (crawl, not stopped) — smooth curve
-  digitalWrite(in3, LOW);
-  digitalWrite(in4, HIGH);
-  analogWrite(enB, applyTrim(TURN_SLIGHT_SPEED, rightTrim));
-}
-
-void steerLeft() {
-  lastDirection = 'l';
-
-  // Left motor very slow (crawl, not stopped) — smooth curve
-  digitalWrite(in1, HIGH);
-  digitalWrite(in2, LOW);
-  analogWrite(enA, applyTrim(TURN_SLIGHT_SPEED, leftTrim));
-
-  // Right motor full forward speed
-  digitalWrite(in3, LOW);
-  digitalWrite(in4, HIGH);
-  analogWrite(enB, applyTrim(FORWARD_SPEED, rightTrim));
-}
-// ========== MANUAL CONTROL FUNCTIONS ==========
-void manualBackward() {
-  digitalWrite(in1, LOW);
-  digitalWrite(in2, HIGH);
-  analogWrite(enA, 150);
-  digitalWrite(in3, HIGH);
-  digitalWrite(in4, LOW);
-  analogWrite(enB, 150);
+  // SHARP RIGHT (only right sensor on)
+  else if (rightSensor > 0.2 && centerSensor < 0.1) {
+    driveBalanced(255, 70);   // Left faster, right slower
+    Serial.println("SHARP RIGHT");
+    lastDirection = 'R';
+  }
+  // DEFAULT
+  else {
+    driveBalanced(220, 90);
+    Serial.println("DEFAULT");
+  }
+  
+  delay(2);
 }
 
+// ========== MANUAL CONTROL ==========
 void manualForward() {
-  digitalWrite(in1, HIGH);
-  digitalWrite(in2, LOW);
-  analogWrite(enA, FORWARD_SPEED);
-  digitalWrite(in3, LOW);
-  digitalWrite(in4, HIGH);
-  analogWrite(enB, FORWARD_SPEED);
+  driveBalanced(240, 110);
+}
+
+void manualBackward() {
+  driveBalanced(-240, -110);
 }
 
 void manualTurnRight() {
-  digitalWrite(in1, HIGH);
-  digitalWrite(in2, LOW);
-  analogWrite(enA, 100);
-  digitalWrite(in3, HIGH);
-  digitalWrite(in4, LOW);
-  analogWrite(enB, 150);
+  driveBalanced(255, -100);  // Left forward, right backward
 }
 
 void manualTurnLeft() {
-  digitalWrite(in1, LOW);
-  digitalWrite(in2, HIGH);
-  analogWrite(enA, 150);
-  digitalWrite(in3, LOW);
-  digitalWrite(in4, HIGH);
-  analogWrite(enB, 100);
+  driveBalanced(-240, 120);  // Left backward, right forward
 }
 
 void stopMotors() {
@@ -402,10 +300,11 @@ void sendWebPage(WiFiClient &client) {
   client.println("</head><body style='text-align:center;font-family:Arial;'>");
 
   client.println("<h1>🤖 Line Follower Robot</h1>");
-  client.println("<p>Analog IR Sensors</p>");
+  client.println("<p>Optimized for Mismatched Motors</p>");
 
-  client.println("<button onclick=\"fetch('/AUTO_ON')\">AUTO ON</button><br><br>");
-  client.println("<button onclick=\"fetch('/AUTO_OFF')\">AUTO OFF</button><br><br>");
+  client.println("<button onclick=\"fetch('/AUTO_ON')\" style='font-size:18px;padding:10px;'>AUTO ON</button><br><br>");
+  client.println("<button onclick=\"fetch('/AUTO_OFF')\" style='font-size:18px;padding:10px;'>AUTO OFF</button><br><br>");
+  client.println("<hr>");
 
   client.println("<button onclick=\"fetch('/F')\">FORWARD</button><br><br>");
   client.println("<button onclick=\"fetch('/L')\">LEFT</button>");
