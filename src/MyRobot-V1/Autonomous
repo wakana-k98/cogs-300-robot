@@ -1,8 +1,8 @@
 #include <WiFiS3.h>
 
 // ========== HOTSPOT CREDENTIALS ==========
-const char* ssid = "Brady";
-const char* password = "Brady2005";
+const char* ssid = "Wakana's IPhone";
+const char* password = "2atncbyzf7z5";
 
 WiFiServer server(80);
 
