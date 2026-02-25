@@ -1,0 +1,91 @@
+int enA = 9;
+int in1 = 8;
+int in2 = 7;
+
+int enB = 10;
+int in3 = 12;
+int in4 = 13;
+
+#define left A0
+#define right A1
+#define SPEED 55
+#define turnSPEED 100
+
+void setup() {
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(enB, OUTPUT);
+  pinMode(in3, OUTPUT);
+  pinMode(in4, OUTPUT);
+  pinMode(left, INPUT);
+  pinMode(right, INPUT);
+  Serial.begin(9600);
+}
+
+void moveForward(){
+  analogWrite(enA, SPEED);
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enB, SPEED);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+}
+
+void moveBackward(){
+  analogWrite(enA, SPEED);
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, HIGH);
+  analogWrite(enB, SPEED);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+}
+
+void stopMotors(){
+  analogWrite(enA, 0);
+  analogWrite(enB, 0);
+}
+
+void loop() {
+  if(digitalRead(left)==1 && digitalRead(right)==1){
+    moveForward();
+    delay(50); // adjust this for your robot
+  }
+  else if(digitalRead(left)==1 && digitalRead(right)==0){
+    // Turn right
+    analogWrite(enA, SPEED + 100);
+    digitalWrite(in1, HIGH);
+    digitalWrite(in2, LOW);
+    analogWrite(enB, SPEED + 100);
+    digitalWrite(in3, HIGH);
+    digitalWrite(in4, LOW);
+    delay(50); // adjust this for your robot
+  }
+  else if(digitalRead(left)==0 && digitalRead(right)==1){
+    // Turn left
+    analogWrite(enA, SPEED);
+    digitalWrite(in1, LOW);
+    digitalWrite(in2, HIGH);
+    analogWrite(enB, SPEED + 50);
+    digitalWrite(in3, LOW);
+    digitalWrite(in4, HIGH);
+    delay(50); // adjust this for your robot
+  }
+  else if(digitalRead(left)==0 && digitalRead(right)==0){
+// 90 degree right turn
+
+analogWrite(enA, 250);
+digitalWrite(in1, HIGH);
+digitalWrite(in2, LOW);
+
+analogWrite(enB, 250);
+digitalWrite(in3, HIGH);
+digitalWrite(in4, LOW);
+
+delay(50); // adjust this for your robot
+}
+
+  else{
+    stopMotors();
+  }
+}
