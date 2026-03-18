@@ -1,0 +1,430 @@
+#include <Servo.h>
+
+// Motor A
+int enA = 9;
+int in1 = 8;
+int in2 = 7;
+
+// Motor B
+int enB = 10;
+int in3 = 12;
+int in4 = 13;
+
+// Ultrasonic Sensor
+const int TrigPIN = 3;
+const int EchoPIN = 4;
+
+// Servo
+#define ServoPIN 11
+
+#define SPEED 200
+#define TURN_SPEED 200
+#define SWEEP_STEPS 19
+#define NUM_SWEEPS 3
+#define VALID_DIST_MAX       150.0  // Above this = out of range / past wall edge
+#define WALL_SMOOTHNESS      20.0   // Max cm delta between adjacent valid points to be "smooth"
+#define OBJECT_DROP          25.0   // Min cm sudden drop vs left neighbor
+#define OBJECT_RISE          25.0   // Min cm rise back up vs right neighbor
+#define MIN_WALL_POINTS      5      // Minimum valid points to attempt any detection
+#define MIN_SMOOTH_SEGMENT   5      // Minimum consecutive smooth points to declare a wall
+#define CONFIDENCE_MIN       0.50
+
+Servo SER1;
+
+float sweepData[NUM_SWEEPS][SWEEP_STEPS];
+float bayesAvg[SWEEP_STEPS];
+float bayesConf[SWEEP_STEPS];
+
+// ──────────────────────────────────────────────
+// SENSOR
+// ──────────────────────────────────────────────
+float readDistance() {
+  digitalWrite(TrigPIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TrigPIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TrigPIN, LOW);
+  float duration = pulseIn(EchoPIN, HIGH, 30000);
+  float cm = duration / 58.8;
+  if (cm <= 0 || cm > 400) cm = 400;
+  return cm;
+}
+
+// ──────────────────────────────────────────────
+// MOTOR CONTROLS
+// ──────────────────────────────────────────────
+void moveForward() {
+  analogWrite(enA, SPEED);
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enB, SPEED);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+}
+
+void moveBackward() {
+  analogWrite(enA, SPEED);
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, HIGH);
+  analogWrite(enB, SPEED);
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+}
+
+void stopMotors() {
+  analogWrite(enA, 0);
+  analogWrite(enB, 0);
+}
+
+void turnRight(int ms) {
+  analogWrite(enA, TURN_SPEED);
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enB, TURN_SPEED);
+  digitalWrite(in3, HIGH);
+  digitalWrite(in4, LOW);
+  delay(ms);
+  stopMotors();
+  delay(100);
+}
+
+void turnLeft(int ms) {
+  analogWrite(enA, TURN_SPEED);
+  digitalWrite(in1, LOW);
+  digitalWrite(in2, HIGH);
+  analogWrite(enB, TURN_SPEED);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+  delay(ms);
+  stopMotors();
+  delay(100);
+}
+
+// ──────────────────────────────────────────────
+// SWEEP
+// ──────────────────────────────────────────────
+void performSweep(int sweepIndex) {
+  for (int i = 0; i < SWEEP_STEPS; i++) {
+    int angle = map(i, 0, SWEEP_STEPS - 1, 0, 180);
+    SER1.write(angle);
+    delay(120);
+    sweepData[sweepIndex][i] = readDistance();
+
+    Serial.print("Sweep ");
+    Serial.print(sweepIndex);
+    Serial.print(" | Angle: ");
+    Serial.print(angle);
+    Serial.print(" | Dist: ");
+    Serial.println(sweepData[sweepIndex][i]);
+  }
+  SER1.write(90);
+  delay(300);
+}
+
+// ──────────────────────────────────────────────
+// BAYES FILTER
+// ──────────────────────────────────────────────
+void applyBayesFilter() {
+  for (int i = 0; i < SWEEP_STEPS; i++) {
+    float sum = 0;
+    for (int s = 0; s < NUM_SWEEPS; s++) sum += sweepData[s][i];
+    bayesAvg[i] = sum / NUM_SWEEPS;
+
+    float variance = 0;
+    for (int s = 0; s < NUM_SWEEPS; s++) {
+      float diff = sweepData[s][i] - bayesAvg[i];
+      variance += diff * diff;
+    }
+    variance /= NUM_SWEEPS;
+
+    float conf = 1.0 - min(variance / 2500.0, 1.0);
+    bayesConf[i] = conf;
+
+    Serial.print("Slot ");
+    Serial.print(i);
+    Serial.print(" | AvgDist: ");
+    Serial.print(bayesAvg[i]);
+    Serial.print(" | Conf: ");
+    Serial.println(bayesConf[i]);
+  }
+}
+
+// ──────────────────────────────────────────────
+// ANALYSIS
+// ──────────────────────────────────────────────
+int objectAngleIndex = -1;
+
+bool isValid(float d) {
+  return (d > 0 && d < VALID_DIST_MAX);
+}
+
+// Check if a sequence of values is smoothly going up OR smoothly going down
+// (monotonic with allowed noise tolerance)
+bool isSmoothTrend(int startSlot, int endSlot) {
+  if (endSlot - startSlot < 2) return true; // Too short to check trend, allow it
+  
+  int risingCount  = 0;
+  int fallingCount = 0;
+  int flatCount    = 0;
+  int pairs        = 0;
+
+  for (int i = startSlot + 1; i <= endSlot; i++) {
+    float delta = bayesAvg[i] - bayesAvg[i - 1];
+    pairs++;
+    if (delta > 2.0)       risingCount++;
+    else if (delta < -2.0) fallingCount++;
+    else                   flatCount++;
+  }
+
+  // It's a smooth trend if it's mostly going one direction (or flat)
+  // Allow up to 2 reversals for sensor noise
+  int dominantDirection = max(risingCount, max(fallingCount, flatCount));
+  int violations = pairs - dominantDirection;
+
+  Serial.print("  Trend check slots ");
+  Serial.print(startSlot);
+  Serial.print("-");
+  Serial.print(endSlot);
+  Serial.print(": rising=");
+  Serial.print(risingCount);
+  Serial.print(" falling=");
+  Serial.print(fallingCount);
+  Serial.print(" flat=");
+  Serial.print(flatCount);
+  Serial.print(" violations=");
+  Serial.println(violations);
+
+  return (violations <= 2);
+}
+
+int analyzeEnvironment() {
+  // ── Step 1: Build valid-point mask ──
+  bool valid[SWEEP_STEPS];
+  for (int i = 0; i < SWEEP_STEPS; i++) {
+    valid[i] = (bayesConf[i] >= CONFIDENCE_MIN) && isValid(bayesAvg[i]);
+  }
+
+  int validCount = 0;
+  for (int i = 0; i < SWEEP_STEPS; i++) if (valid[i]) validCount++;
+
+  Serial.print("Valid points: ");
+  Serial.println(validCount);
+
+  if (validCount < MIN_WALL_POINTS) {
+    Serial.println("DETECTION: Inconclusive (too few valid points)");
+    return -1;
+  }
+
+  // ── Step 2: Check for OBJECT signature ──
+  // A local minimum where both nearest valid neighbors are significantly farther
+  for (int i = 1; i < SWEEP_STEPS - 1; i++) {
+    if (!valid[i]) continue;
+
+    float leftDist = -1;
+    for (int j = i - 1; j >= 0; j--) {
+      if (valid[j]) { leftDist = bayesAvg[j]; break; }
+    }
+
+    float rightDist = -1;
+    for (int j = i + 1; j < SWEEP_STEPS; j++) {
+      if (valid[j]) { rightDist = bayesAvg[j]; break; }
+    }
+
+    if (leftDist < 0 || rightDist < 0) continue;
+
+    float dropFromLeft  = leftDist  - bayesAvg[i];
+    float dropFromRight = rightDist - bayesAvg[i];
+
+    Serial.print("Slot ");
+    Serial.print(i);
+    Serial.print(" | dist=");
+    Serial.print(bayesAvg[i]);
+    Serial.print(" | dropL=");
+    Serial.print(dropFromLeft);
+    Serial.print(" | dropR=");
+    Serial.println(dropFromRight);
+
+    if (dropFromLeft > OBJECT_DROP && dropFromRight > OBJECT_RISE) {
+      objectAngleIndex = i;
+      Serial.print("DETECTION: Object at slot ");
+      Serial.print(i);
+      Serial.print(" (angle ");
+      Serial.print(map(i, 0, SWEEP_STEPS - 1, 0, 180));
+      Serial.println(" deg)");
+      return 1;
+    }
+  }
+
+  // ── Step 3: Check for WALL signature ──
+  // Strategy: find the longest contiguous run of valid points where
+  // adjacent deltas are within WALL_SMOOTHNESS AND the overall shape
+  // is a smooth trend (going up, going down, or a gentle curve up-then-down).
+  // Noisy edge slots are naturally excluded because they fail the smoothness check.
+
+  int bestSegmentStart  = -1;
+  int bestSegmentLength = 0;
+  int segStart = -1;
+  int segLen   = 0;
+
+  for (int i = 0; i < SWEEP_STEPS; i++) {
+    if (!valid[i]) {
+      // Break current segment
+      if (segLen > bestSegmentLength) {
+        bestSegmentLength = segLen;
+        bestSegmentStart  = segStart;
+      }
+      segLen = 0;
+      segStart = -1;
+      continue;
+    }
+
+    if (segLen == 0) {
+      // Start a new segment
+      segStart = i;
+      segLen   = 1;
+    } else {
+      float delta = abs(bayesAvg[i] - bayesAvg[i - 1]);
+      if (delta <= WALL_SMOOTHNESS) {
+        segLen++;
+      } else {
+        // This transition is too rough — end segment here
+        if (segLen > bestSegmentLength) {
+          bestSegmentLength = segLen;
+          bestSegmentStart  = segStart;
+        }
+        // Start fresh from current point
+        segStart = i;
+        segLen   = 1;
+      }
+    }
+  }
+  // Catch segment that runs to the end
+  if (segLen > bestSegmentLength) {
+    bestSegmentLength = segLen;
+    bestSegmentStart  = segStart;
+  }
+
+  Serial.print("Best smooth segment: start=");
+  Serial.print(bestSegmentStart);
+  Serial.print(" length=");
+  Serial.println(bestSegmentLength);
+
+  if (bestSegmentLength >= MIN_SMOOTH_SEGMENT) {
+    // Now check if this segment has a predictable trend:
+    // It should be smoothly rising, smoothly falling, or a smooth curve
+    // (rises then falls, or falls then rises — like a wall arc).
+    // We split it at its min/max and check each half is a smooth trend.
+    int segEnd = bestSegmentStart + bestSegmentLength - 1;
+
+    // Find the index of the minimum value in this segment (wall arc bottom)
+    int minIdx = bestSegmentStart;
+    float minVal = bayesAvg[bestSegmentStart];
+    for (int i = bestSegmentStart + 1; i <= segEnd; i++) {
+      if (bayesAvg[i] < minVal) {
+        minVal = bayesAvg[i];
+        minIdx = i;
+      }
+    }
+
+    // Check left half (bestSegmentStart → minIdx) is smoothly falling
+    // and right half (minIdx → segEnd) is smoothly rising — or the whole
+    // thing is just monotonically trending one way
+    bool leftOk  = isSmoothTrend(bestSegmentStart, minIdx);
+    bool rightOk = isSmoothTrend(minIdx, segEnd);
+
+    Serial.print("Wall arc check: leftOk=");
+    Serial.print(leftOk);
+    Serial.print(" rightOk=");
+    Serial.println(rightOk);
+
+    if (leftOk && rightOk) {
+      Serial.println("DETECTION: Wall (smooth predictable arc)");
+      return 0;
+    }
+  }
+
+  Serial.println("DETECTION: Inconclusive");
+  return -1;
+}
+
+// ──────────────────────────────────────────────
+// FULL SCAN
+// ──────────────────────────────────────────────
+int fullScan() {
+  for (int s = 0; s < NUM_SWEEPS; s++) {
+    performSweep(s);
+    delay(200);
+  }
+  applyBayesFilter();
+  return analyzeEnvironment();
+}
+
+// ──────────────────────────────────────────────
+// SETUP
+// ──────────────────────────────────────────────
+void setup() {
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(enB, OUTPUT);
+  pinMode(in3, OUTPUT);
+  pinMode(in4, OUTPUT);
+  pinMode(TrigPIN, OUTPUT);
+  pinMode(EchoPIN, INPUT);
+
+  SER1.attach(ServoPIN);
+  SER1.write(90);
+  delay(500);
+
+  Serial.begin(9600);
+  Serial.println("System ready. Starting scan...");
+}
+
+// ──────────────────────────────────────────────
+// MAIN LOOP
+// ──────────────────────────────────────────────
+void loop() {
+  stopMotors();
+  int result = fullScan();
+
+  if (result == 1) {
+    // Object detected — turn to face it
+    int angle = map(objectAngleIndex, 0, SWEEP_STEPS - 1, 0, 180);
+    Serial.print("Object at servo angle: ");
+    Serial.println(angle);
+
+    if (angle < 80) {
+      Serial.println("Turning LEFT toward object");
+      turnLeft(300);
+    } else if (angle > 100) {
+      Serial.println("Turning RIGHT toward object");
+      turnRight(300);
+    }
+
+    // Confirmation scan before approaching
+    delay(300);
+    int confirm = fullScan();
+    if (confirm == 1) {
+      Serial.println("Object confirmed! Moving toward it.");
+      moveForward();
+      delay(600);
+      stopMotors();
+    } else {
+      Serial.println("Object not confirmed on second scan. Re-scanning.");
+    }
+
+  } else if (result == 0) {
+    // Wall detected — turn away and re-scan
+    Serial.println("Wall detected. Turning to find new path.");
+    turnRight(500);
+    delay(300);
+
+  } else {
+    // Inconclusive — nudge forward and try again
+    Serial.println("Inconclusive scan. Moving forward slightly.");
+    moveForward();
+    delay(300);
+    stopMotors();
+  }
+
+  delay(200);
