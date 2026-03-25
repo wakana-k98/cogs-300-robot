@@ -1,0 +1,27 @@
+int enA = 9;
+int in1 = 8;
+int in2 = 7;
+int enB = 10;
+int in3 = 12;
+int in4 = 13;
+
+#define SPEED_RIGHT  68
+#define SPEED_LEFT 75
+
+void setup() {
+  pinMode(enA, OUTPUT);
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(enB, OUTPUT);
+  pinMode(in3, OUTPUT);
+  pinMode(in4, OUTPUT);
+}
+
+void loop() {
+  analogWrite(enA, SPEED_LEFT);
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);
+  analogWrite(enB, SPEED_RIGHT);
+  digitalWrite(in3, LOW);
+  digitalWrite(in4, HIGH);
+}
