@@ -63,10 +63,10 @@ void loop() {
   }
   else if(digitalRead(left)==0 && digitalRead(right)==1){
     // Turn left
-    analogWrite(enA, SPEED);
+    analogWrite(enA, SPEED + 100);
     digitalWrite(in1, LOW);
     digitalWrite(in2, HIGH);
-    analogWrite(enB, SPEED + 50);
+    analogWrite(enB, SPEED + 100);
     digitalWrite(in3, LOW);
     digitalWrite(in4, HIGH);
     delay(50); // adjust this for your robot
